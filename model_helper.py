@@ -5,6 +5,7 @@ from numpy.lib.npyio import load
 from sklearn.linear_model import LogisticRegression
 import sklearn
 from torch._C import dtype
+from torch.types import Number
 from FNN import FNN
 from data_helper import Data, DataHelper, SyntheticDataHelper
 import utils.common_utils as cu
@@ -34,7 +35,7 @@ class ModelHelper(ABC):
         self.sw = None
 
         self.batch_size = 16
-        self.lr = 1e-4
+        self.lr = 1e-3
 
         self.__init_kwargs(kwargs)
         self.__init_loaders()
@@ -254,18 +255,27 @@ class RecourseHelper(ModelHelper):
             util_grp = 0
             for id, x, y, z, beta in zip(id_grp, X_grp, y_grp, Z_grp, Beta_grp):
                 x, y, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
-
+                
+                num_grp = x.size(0)
                 rec_out = self.rec_model.forward(x, beta)
                 rec_out = torch.sigmoid(rec_out)
-                rec_out = torch.log(rec_out + 1e-5)
-                rec_out = torch.sum(rec_out, dim=1)
+
+                rec_out_agg = rec_out.repeat_interleave(num_grp, dim=0)
+                beta_agg = beta.repeat(num_grp, 1)
+                rec_out_agg = torch.mul(beta_agg, torch.log(rec_out_agg + 1e-5)) + torch.mul(1-beta_agg, torch.log(1-rec_out_agg+1e-5))
+                rec_out_agg = torch.sum(rec_out_agg, dim=1)
 
                 cls_out = self._model.forward(x, beta)
                 cls_out = torch.softmax(cls_out, dim=1)
                 cls_out = torch.gather(cls_out, 1, y.view(-1, 1)).squeeze()
                 cls_out = torch.log(cls_out)
+                cls_out_agg = cls_out.repeat_interleave(num_grp, dim=0)
 
-                util = torch.max(rec_out + cls_out)
+                util = rec_out_agg + cls_out_agg
+                util = util.view(num_grp, -1)
+                util, _ = torch.max(util, dim=0)
+                util = torch.sum(util)
+
                 util_grp += util
 
             loss = -util_grp/len(X_grp)
@@ -292,7 +302,8 @@ class RecourseHelper(ModelHelper):
         self._model.eval()
         Beta = kwargs["Beta"]
         X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
-        y_preds = self._model.forward(X, Beta)
+        with torch.no_grad():
+            y_preds = self._model.forward(X, Beta)
         y_preds = torch.softmax(y_preds, dim=1)
         y_preds = torch.argmax(y_preds, dim=1)
         return y_preds.cpu().numpy()
@@ -301,9 +312,18 @@ class RecourseHelper(ModelHelper):
         self._model.eval()
         Beta = kwargs["Beta"]
         X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
-        y_preds = self._model.forward(X, Beta)
+        with torch.no_grad():
+            y_preds = self._model.forward(X, Beta)
         y_preds = torch.softmax(y_preds, dim=1)
         return y_preds.cpu().numpy()
+
+    def predict_betas(self, X, Beta) -> np.array:
+        self.rec_model.eval()
+        X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
+        with torch.no_grad():
+            pred_beta = self.rec_model.forward(X, Beta)
+            pred_beta = torch.sigmoid(pred_beta)
+        return pred_beta.cpu().numpy()
 
     def get_defdir(self):
         return super().get_defdir() / "recourse" / str(self.dh)
@@ -386,7 +406,8 @@ class NNHelper(ModelHelper):
         self._model.eval()
         Beta = kwargs["Beta"]
         X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
-        y_preds = self._model.forward(X, Beta)
+        with torch.no_grad():
+            y_preds = self._model.forward(X, Beta)
         y_preds = torch.softmax(y_preds, dim=1)
         y_preds = torch.argmax(y_preds, dim=1)
         return y_preds.cpu().numpy()
@@ -395,7 +416,8 @@ class NNHelper(ModelHelper):
         self._model.eval()
         Beta = kwargs["Beta"]
         X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
-        y_preds = self._model.forward(X, Beta)
+        with torch.no_grad():
+            y_preds = self._model.forward(X, Beta)
         y_preds = torch.softmax(y_preds, dim=1)
         return y_preds.cpu().numpy()
 

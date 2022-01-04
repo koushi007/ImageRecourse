@@ -20,7 +20,7 @@ prior=0.5
 num_train=1000 
 B_per_i=10
 num_test=1000 
-beta_noise=0.7 
+beta_noise=0.7
 mean_start=0.5 
 mean_step=0.1 
 var_start=0.05 
@@ -43,6 +43,8 @@ train, test = sdh._train, sdh._test
 # cu.pretty_print(lr_cls.grp_accuracy(test._X, test._Beta, test._0INDy))
 # print(f"Classifier Weights: {lr_cls._weights}")
 # sys.exit()
+
+
 
 # %% NN ClS model
 # sw = SummaryWriter(log_dir=f"tblogs/{str(sdh)}/nn_cls")
@@ -72,20 +74,20 @@ train, test = sdh._train, sdh._test
 
 
 # %% Recourse Model
-sw = SummaryWriter(log_dir="tblogs/recourse")
+sw = SummaryWriter(log_dir=f"tblogs/{str(sdh)}/recourse")
 kwargs = {
     "summarywriter": sw,
     "batch_size": 50,
 }
 rh = RecourseHelper(trn_data=train, tst_data=test, dh=sdh, **kwargs)
-for epoch in range(50):
-    rh.fit_epoch(epoch)
+# for epoch in range(50):
+#     rh.fit_epoch(epoch)
 
-    acc = rh.accuracy(test._X, test._0INDy, Beta=test._Beta)
-    rh._sw.add_scalar("Epoch_Acc", acc, epoch)
-    print(f"Test Accuracy = {acc}")
+#     acc = rh.accuracy(test._X, test._0INDy, Beta=test._Beta)
+#     rh._sw.add_scalar("Epoch_Acc", acc, epoch)
+#     print(f"Test Accuracy = {acc}")
 
-rh.save_model_def()
+# rh.save_model_def()
 
 rh.load_model_defname()
 cu.set_seed(42)
@@ -94,6 +96,8 @@ print(f"train accuracy = {rh.accuracy(train._X, train._0INDy, Beta=train._Beta)}
 print(f"Test Accuracy = {rh.accuracy(test._X, test._0INDy, Beta=test._Beta)}")
 print(f"Raw test grp accuracy:")
 cu.pretty_print(rh.grp_accuracy(test._X, test._Beta, test._0INDy))
+rec_betas = rh.predict_betas(test._X, test._Beta)
+print(np.sum(rec_betas > 0.5, axis=0))
 sys.exit()
 
 # %%
