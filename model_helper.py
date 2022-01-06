@@ -99,6 +99,10 @@ class ModelHelper(ABC):
         self.criterion = value
 
     @property
+    def _KLCriterion(self):
+        return nn.KLDivLoss(reduction="batchmean")
+
+    @property
     def _optimizer(self):
         if  self.optimizer == None:
             raise ValueError("optimizer not yet set")
@@ -238,8 +242,17 @@ class RecourseHelper(ModelHelper):
             {'params': self.rec_model.parameters()},
         ], lr=self._lr)
 
+        self.rec_optimizer = AdamW([
+            {'params': self.rec_model.parameters()},
+        ], lr=self._lr)
 
-    def fit_epoch(self, epoch, loader=None):
+
+    def fit_epoch(self, epoch, loader=None, *args, **kwargs):
+        
+        inter_iters = -1
+        if "interleave_iters" in kwargs:
+            inter_iters = kwargs["interleave_iters"]
+
         self._model.train()
         self.rec_model.train()
 
@@ -248,13 +261,13 @@ class RecourseHelper(ModelHelper):
         
         step = epoch * len(loader)
         tq = tqdm(total=len(loader), desc="Loss")
-        for id_grp, X_grp, y_grp, Z_grp, Beta_grp in loader:
+        for step_idx, (id_grp, X_grp, y_grp, Z_grp, Beta_grp) in enumerate(loader):
             step += 1
-            self._optimizer.zero_grad()
-
             util_grp = 0
             for id, x, y, z, beta in zip(id_grp, X_grp, y_grp, Z_grp, Beta_grp):
+                
                 x, y, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
+                self._optimizer.zero_grad()
                 
                 num_grp = x.size(0)
                 rec_out = self.rec_model.forward(x, beta)
@@ -271,6 +284,17 @@ class RecourseHelper(ModelHelper):
                 cls_out = torch.log(cls_out)
                 cls_out_agg = cls_out.repeat_interleave(num_grp, dim=0)
 
+                do_rec, do_cls = 1, 1
+                if inter_iters != -1:
+                    if (step_idx % (2*inter_iters)) % inter_iters == 0:
+                        # print("doing cls")
+                        do_rec = 0
+                    else:
+                        # print("doing rec")
+                        do_cls = 0 
+                util = (do_rec * rec_out_agg) + (do_cls * cls_out_agg)
+
+
                 util = rec_out_agg + cls_out_agg
                 util = util.view(num_grp, -1)
                 util, _ = torch.max(util, dim=0)
@@ -285,18 +309,68 @@ class RecourseHelper(ModelHelper):
             tq.set_description(f"Loss: {loss.item()}")
             tq.update(1)
 
-    
 
-    def accuracy(self, X_test, y_test, *args, **kwargs) -> float:
+    def entropy_bias(self, loader=None, epochs=5):
+        self.rec_model.train()
+        if loader is None:
+            loader = self.trn_loader
+
+        step = 0
+        target = torch.tensor(torch.ones(self.batch_size, self._Xdim)).to(cu.get_device())
+        target = target / self._Xdim
+
+        for epoch in range(epochs):
+            tq = tqdm(total=len(loader), desc="Loss")
+            for id, x, _, _, beta in loader:
+                step += 1
+                x, beta = x.to(cu.get_device()), beta.to(cu.get_device())
+                self.rec_optimizer.zero_grad()
+
+                y_preds = self.rec_model(x, beta)
+                y_preds = torch.softmax(y_preds, dim=1)
+                y_preds = torch.log(y_preds)
+
+                loss = self._KLCriterion(y_preds, target)
+                loss.backward()
+                self.rec_optimizer.step()
+                self._sw.add_scalar("Ent-Prior", loss.item(), step)
+                tq.set_description(f"Lossh: {loss.item()}")
+                tq.update(1)
+
+    def accuracy(self, X_test = None, y_test=None, *args, **kwargs) -> float:
+        if X_test is None:
+            X_test = self._tst_data._X
+            y_test = self._tst_data._0INDy
+            kwargs["Beta"] = self._tst_data._Beta
         return super().accuracy(X_test, y_test, *args, **kwargs)
 
-    def grp_accuracy(self, X: np.array, Beta: np.array, y: np.arange, *args, **kwargs) -> dict:
+    def grp_accuracy(self, X_test: np.array = None, Beta_test: np.array = None, y_test: np.arange=None, *args, **kwargs) -> dict:
+        if X_test is None:
+            X_test = self._tst_data._X
+            y_test = self._tst_data._0INDy
+            Beta_test = self._tst_data._Beta
         res_dict = {}
         for beta_id in range(self._Betadim):
-            beta_samples = np.where(Beta[:, beta_id] == 1)
-            kwargs = {"Beta": Beta[beta_samples]}
-            res_dict[beta_id] = self.accuracy(X[beta_samples], y[beta_samples], **kwargs)
+            beta_samples = np.where(Beta_test[:, beta_id] == 1)
+            kwargs = {"Beta": Beta_test[beta_samples]}
+            res_dict[beta_id] = self.accuracy(X_test[beta_samples], y_test[beta_samples], **kwargs)
         return res_dict
+
+    def ent_pretrn_acc(self):
+        loader = self.tst_loader
+
+        self.rec_model.eval()
+        crcts = 0
+        with torch.no_grad():
+            for id, x, y, z, beta in loader:
+                x, y, z, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), z.to(cu.get_device()), beta.to(cu.get_device())
+                rec_beta = self.rec_model(x, beta)
+                rec_beta = rec_beta > 0.5
+                x_rec = torch.mul(z, rec_beta)
+                acc = self.accuracy(x_rec.cpu().numpy(), y.cpu().numpy(), Beta=rec_beta.cpu().numpy())
+                crcts += acc
+        return crcts / len(loader)
+
     
     def predict(self, X, *args, **kwargs) -> np.array:
         self._model.eval()
@@ -331,7 +405,7 @@ class RecourseHelper(ModelHelper):
     def get_defname(self):
         return "recourse_theta_phi.pt"
     
-    def save_model_def(self):
+    def save_model_defname(self):
         state_dict = {
             "recourse": self.rec_model.state_dict(),
             "classifier": self._model.state_dict()
@@ -346,7 +420,17 @@ class RecourseHelper(ModelHelper):
         self.rec_model.load_state_dict(state_dict["recourse"])
         print(f"Models loader from {str(self.get_defdir() / self.get_defname())}")
 
+    def load_def_classifier(self):
+        fname = f"{super().get_defdir()}/nn_cls/{str(self.dh)}/classifier.pt"
+        self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
+    def save_rec_model(self, suffix=""):
+        fname = self.get_defdir() / f"rec_model{suffix}.pt"
+        torch.save(self.rec_model.state_dict(), fname)
+    
+    def load_rec_model(self, suffix=""):
+        fname = self.get_defdir() / f"rec_model{suffix}.pt"
+        self.rec_model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
 class NNHelper(ModelHelper):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
