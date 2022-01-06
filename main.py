@@ -5,7 +5,7 @@ from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
 import utils.common_utils as cu
 from data_helper import SyntheticDataHelper
-from model_helper import LRHelper, ModelHelper, NNHelper, RecourseHelper
+from model_helper import LRHelper, Method1Helper, ModelHelper, NNHelper, RecourseHelper
 import sys
 
 
@@ -53,51 +53,61 @@ train, test = sdh._train, sdh._test
 #     "batch_size": 50,
 # }
 # nnh = NNHelper(trn_data=train, tst_data=test, dh=sdh, **kwargs)
-# # for epoch in range(50):
-# #     nnh.fit_epoch(epoch)
-# #     kwargs = {
-# #         "Beta": test._Beta
-# #     }
-# #     acc = nnh.accuracy(test._X, test._0INDy, **kwargs)
-# #     nnh._sw.add_scalar("Epoch_Acc", acc, epoch)
-# #     print(f"Test Accuracy = {acc}")
-# # nnh.save_model_def()
-# nnh.load_model_defname()
+# for epoch in range(10):
+#     nnh.fit_epoch(epoch)
+#     kwargs = {
+#         "Beta": test._Beta
+#     }
+#     acc = nnh.accuracy(test._X, test._0INDy, **kwargs)
+#     nnh._sw.add_scalar("Epoch_Acc", acc, epoch)
+#     print(f"Test Accuracy = {acc}")
+# nnh.save_model_defname(suffix="-final")
+# nnh.load_model_defname(suffix="-final")
 
 # cu.set_seed(42)
 
 # print(f"train accuracy = {nnh.accuracy(train._X, train._0INDy, Beta=train._Beta)}")
 # print(f"Test Accuracy = {nnh.accuracy(test._X, test._0INDy, Beta=test._Beta)}")
 # print(f"Raw test grp accuracy:")
-# cu.pretty_print(nnh.grp_accuracy(test._X, test._Beta, test._0INDy))
+# cu.dict_print(nnh.grp_accuracy(test._X, test._Beta, test._0INDy))
 # sys.exit()
 
 
 # %% Recourse Model
-sw = SummaryWriter(log_dir=f"tblogs/{str(sdh)}/recourse")
+sw = SummaryWriter(log_dir=f"tblogs/{str(sdh)}/+")
 kwargs = {
     "summarywriter": sw,
     "batch_size": 50,
 }
-rh = RecourseHelper(trn_data=train, tst_data=test, dh=sdh, **kwargs)
-# for epoch in range(50):
-#     rh.fit_epoch(epoch)
+rh = Method1Helper(trn_data=train, tst_data=test, dh=sdh, **kwargs)
+rh.load_def_classifier(suffix="-final")
+print(f"Sanity check pretrained classifier: {rh.accuracy()}")
 
-#     acc = rh.accuracy(test._X, test._0INDy, Beta=test._Beta)
-#     rh._sw.add_scalar("Epoch_Acc", acc, epoch)
-#     print(f"Test Accuracy = {acc}")
+print("Fititng the Recourse Classifier")
+# fit_kwargs = {"interleave_iters": 10}
+for epoch in range(100):
+    rh.fit_epoch(epoch)
+    rec_betas = rh.predict_betas(test._X, test._Beta)
+    print(np.sum(rec_betas > 0.5, axis=0))
+    acc = rh.accuracy(test._X, test._0INDy, Beta=test._Beta)
+    rh._sw.add_scalar("Epoch_Acc", acc, epoch)
+    print(f"Test Accuracy = {acc}")
+    print(f"Raw test grp accuracy:")
+    cu.dict_print(rh.grp_accuracy(test._X, test._Beta, test._0INDy))
+rh.save_model_defname(suffix="-method1")
 
-# rh.save_model_def()
-
-rh.load_model_defname()
+rh.load_model_defname(suffix="-method1")
 cu.set_seed(42)
-
 print(f"train accuracy = {rh.accuracy(train._X, train._0INDy, Beta=train._Beta)}")
 print(f"Test Accuracy = {rh.accuracy(test._X, test._0INDy, Beta=test._Beta)}")
 print(f"Raw test grp accuracy:")
-cu.pretty_print(rh.grp_accuracy(test._X, test._Beta, test._0INDy))
+cu.dict_print(rh.grp_accuracy(test._X, test._Beta, test._0INDy))
 rec_betas = rh.predict_betas(test._X, test._Beta)
 print(np.sum(rec_betas > 0.5, axis=0))
+print(f"Prob Mean : {np.mean(rec_betas, axis=0)}")
+
+# print(f"Accuracy after Recourse: {rh.rec_acc}")
+
 sys.exit()
 
 # %%

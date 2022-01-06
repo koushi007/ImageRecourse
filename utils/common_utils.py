@@ -27,7 +27,7 @@ def insert_kwargs(kwargs:dict, new_args:dict):
     merged_args.update(new_args)
     return merged_args
 
-def pretty_print(d:dict):
+def dict_print(d:dict):
     print(json.dumps(d, sort_keys=False, indent=4))
 
 def init_weights(m:nn.Module):

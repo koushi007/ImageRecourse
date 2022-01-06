@@ -98,9 +98,10 @@ class ModelHelper(ABC):
     def _criterion(self, value):
         self.criterion = value
 
-    @property
-    def _KLCriterion(self):
-        return nn.KLDivLoss(reduction="batchmean")
+    def _KLCriterion(self, reduction=None):
+        if reduction is None:
+            reduction = "batchmean"
+        return nn.KLDivLoss(reduction=reduction)
 
     @property
     def _optimizer(self):
@@ -259,53 +260,72 @@ class RecourseHelper(ModelHelper):
         if loader is None:
             loader = self.grp_trn_loader
         
-        step = epoch * len(loader)
+        global_step = epoch * len(loader)
         tq = tqdm(total=len(loader), desc="Loss")
-        for step_idx, (id_grp, X_grp, y_grp, Z_grp, Beta_grp) in enumerate(loader):
-            step += 1
+
+        num_grp = self.dh._train.B_per_i
+        uni_kl_targets = torch.ones(num_grp*num_grp, self._Betadim) / self._Betadim
+        uni_kl_targets = uni_kl_targets.to(cu.get_device())
+        ent_decay = torch.tensor([0.9]).to(cu.get_device())
+    
+        for local_step, (id_grp, X_grp, y_grp, Z_grp, Beta_grp) in enumerate(loader):
             util_grp = 0
             for id, x, y, z, beta in zip(id_grp, X_grp, y_grp, Z_grp, Beta_grp):
                 
                 x, y, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
                 self._optimizer.zero_grad()
                 
-                num_grp = x.size(0)
-                rec_out = self.rec_model.forward(x, beta)
-                rec_out = torch.sigmoid(rec_out)
+                # this is P(\beta_ir | ij)
+                rec_beta = self.rec_model.forward(x, beta)
+                # rec_beta = torch.sigmoid(rec_beta)
+                rec_beta = torch.softmax(rec_beta, dim=1)
+                rec_beta = torch.log(rec_beta + 1e-5)
 
-                rec_out_agg = rec_out.repeat_interleave(num_grp, dim=0)
+                rec_beta_agg = rec_beta.repeat_interleave(num_grp, dim=0)
                 beta_agg = beta.repeat(num_grp, 1)
-                rec_out_agg = torch.mul(beta_agg, torch.log(rec_out_agg + 1e-5)) + torch.mul(1-beta_agg, torch.log(1-rec_out_agg+1e-5))
-                rec_out_agg = torch.sum(rec_out_agg, dim=1)
+                # rec_beta_loss = torch.mul(beta_agg, torch.log(rec_beta_agg + 1e-5)) + torch.mul(1-beta_agg, torch.log(1-rec_beta_agg+1e-5))
+                # rec_beta_loss = torch.sum(rec_beta_agg, dim=1)
+
+                rec_beta_loss_ir = -self._KLCriterion(reduction="none")(rec_beta_agg, beta_agg / torch.sum(beta_agg, dim=1).view(-1, 1))
+                rec_beta_loss_uni = self._KLCriterion(reduction="none")(rec_beta_agg, uni_kl_targets)
+
+
+                rec_beta_loss_ir = torch.sum(rec_beta_loss_ir, dim=1)
+                rec_beta_loss_uni = torch.sum(rec_beta_loss_uni, dim=1)
+                self._sw.add_scalar("-KL(betair || beta|xij)", torch.mean(rec_beta_loss_ir).item(), global_step+local_step)
+                self._sw.add_scalar("KL(betair|| uni)", torch.mean(rec_beta_loss_uni).item(), global_step+local_step)
+                rec_beta_loss = rec_beta_loss_ir + torch.pow(ent_decay, epoch+1) * rec_beta_loss_uni
 
                 cls_out = self._model.forward(x, beta)
                 cls_out = torch.softmax(cls_out, dim=1)
                 cls_out = torch.gather(cls_out, 1, y.view(-1, 1)).squeeze()
-                cls_out = torch.log(cls_out)
-                cls_out_agg = cls_out.repeat_interleave(num_grp, dim=0)
+                cls_out = torch.log(cls_out + 1e-5)
+                cls_loss = cls_out.repeat(num_grp)
 
-                do_rec, do_cls = 1, 1
+                do_rec, do_cls = 0, 0
                 if inter_iters != -1:
-                    if (step_idx % (2*inter_iters)) % inter_iters == 0:
-                        # print("doing cls")
-                        do_rec = 0
+                    if (local_step % (2*inter_iters)) % inter_iters == 0:
+                        do_cls = 1
                     else:
-                        # print("doing rec")
-                        do_cls = 0 
-                util = (do_rec * rec_out_agg) + (do_cls * cls_out_agg)
+                        do_rec = 1
+                util = (do_rec * rec_beta_loss) + (do_cls * cls_loss)
 
-
-                util = rec_out_agg + cls_out_agg
                 util = util.view(num_grp, -1)
-                util, _ = torch.max(util, dim=0)
+                util, max_idxs = torch.max(util, dim=0)
                 util = torch.sum(util)
-
+                
                 util_grp += util
+
+                cls_loss_sw = torch.gather(cls_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
+                rec_loss_sw = torch.gather(rec_beta_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
+                self._sw.add_scalar("cls_loss", torch.mean(cls_loss_sw), global_step+local_step)
+                self._sw.add_scalar("rec_loss", torch.mean(rec_loss_sw), global_step+local_step)
+
 
             loss = -util_grp/len(X_grp)
             loss.backward()
             self._optimizer.step()
-            self._sw.add_scalar("Loss", loss.item(), step)
+            self._sw.add_scalar("Loss", loss.item(), global_step+local_step)
             tq.set_description(f"Loss: {loss.item()}")
             tq.update(1)
 
@@ -403,25 +423,26 @@ class RecourseHelper(ModelHelper):
         return super().get_defdir() / "recourse" / str(self.dh)
     
     def get_defname(self):
-        return "recourse_theta_phi.pt"
+        return "recourse_theta_phi"
     
-    def save_model_defname(self):
+    def save_model_defname(self, suffix = ""):
         state_dict = {
             "recourse": self.rec_model.state_dict(),
             "classifier": self._model.state_dict()
         }
         dir = self.get_defdir()
         dir.mkdir(exist_ok=True, parents=True)
-        torch.save(state_dict, self.get_defdir() / self.get_defname())
+        torch.save(state_dict, self.get_defdir() / (self.get_defname() + suffix + ".pt"))
     
-    def load_model_defname(self):
-        state_dict = torch.load(self.get_defdir() / self.get_defname(), map_location=cu.get_device())
+    def load_model_defname(self, suffix=""):
+        state_dict = torch.load(self.get_defdir() / (self.get_defname() + suffix + ".pt"), map_location=cu.get_device())
         self._model.load_state_dict(state_dict["classifier"])
         self.rec_model.load_state_dict(state_dict["recourse"])
         print(f"Models loader from {str(self.get_defdir() / self.get_defname())}")
 
-    def load_def_classifier(self):
-        fname = f"{super().get_defdir()}/nn_cls/{str(self.dh)}/classifier.pt"
+    def load_def_classifier(self, suffix=""):
+        fname = f"{super().get_defdir()}/nn_cls/{str(self.dh)}/classifier{suffix}.pt"
+        print(f"Loaded NN_cls classifier from {str(fname)}")
         self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
     def save_rec_model(self, suffix=""):
@@ -431,6 +452,52 @@ class RecourseHelper(ModelHelper):
     def load_rec_model(self, suffix=""):
         fname = self.get_defdir() / f"rec_model{suffix}.pt"
         self.rec_model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
+
+
+class Method1Helper(RecourseHelper):
+    def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
+        super().__init__(trn_data, tst_data, dh, nn_arch=nn_arch, *args, **kwargs)
+    
+    def fit_epoch(self, epoch, loader=None, *args, **kwargs):
+
+        print("Training Method 1")
+        
+        self._model.train()
+
+        if loader is None:
+            loader = self.grp_trn_loader
+        
+        global_step = epoch * len(loader)
+        tq = tqdm(total=len(loader), desc="Loss")
+
+        num_grp = self.dh._train.B_per_i
+    
+        for local_step, (id_grp, X_grp, y_grp, Z_grp, Beta_grp) in enumerate(loader):
+            util_grp = 0
+            for id, x, y, z, beta in zip(id_grp, X_grp, y_grp, Z_grp, Beta_grp):
+                
+                x, y, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
+                self._optimizer.zero_grad()
+                
+                cls_out = self._model.forward(x, beta)
+                cls_out = torch.softmax(cls_out, dim=1)
+                cls_out = torch.gather(cls_out, 1, y.view(-1, 1)).squeeze()
+                cls_out = torch.log(cls_out + 1e-5)
+
+                util, max_idxs = torch.max(cls_out, dim=0)
+                util = torch.sum(util)
+
+                if beta[max_idxs[0]][0] != 1:
+                    pass
+                
+                util_grp += util
+
+            loss = -util_grp/len(X_grp)
+            loss.backward()
+            self._optimizer.step()
+            self._sw.add_scalar("Loss", loss.item(), global_step+local_step)
+            tq.set_description(f"Loss: {loss.item()}")
+            tq.update(1)
 
 class NNHelper(ModelHelper):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
@@ -509,17 +576,17 @@ class NNHelper(ModelHelper):
         return super().get_defdir() / "nn_cls" / str(self.dh)
     
     def get_defname(self):
-        return "classifier.pt"
+        return "classifier"
     
-    def save_model_def(self):
+    def save_model_defname(self, suffix=""):
         dir = self.get_defdir()
         dir.mkdir(exist_ok=True, parents=True)
-        torch.save(self._model.state_dict(), dir / self.get_defname())
+        torch.save(self._model.state_dict(), dir / (self.get_defname() + suffix + ".pt"))
     
-    def load_model_defname(self):
-        state_dict = torch.load(self.get_defdir() / self.get_defname(), map_location=cu.get_device())
+    def load_model_defname(self, suffix=""):
+        state_dict = torch.load(self.get_defdir() / (self.get_defname() + suffix + ".pt"), map_location=cu.get_device())
         self._model.load_state_dict(state_dict)
-        print(f"Models loader from {str(self.get_defdir() / self.get_defname())}")
+        print(f"Models loader from {str(self.get_defdir()/(self.get_defname() + suffix + '.pt'))}")
 
 
 
