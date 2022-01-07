@@ -126,7 +126,8 @@ class ModelHelper(ABC):
     def _sw(self, value):
         self.sw = value
 
-    def get_defdir(self):
+    @property
+    def _def_dir(self):
         return Path("results/models")
 
 
@@ -177,12 +178,14 @@ class ModelHelper(ABC):
         """
         raise NotImplementedError()
 
-class LRHelper(ModelHelper):
+class LRHelper:
     def __init__(self, trn_data, tst_data, dh, max_iter=100, *args, **kwargs) -> None:
         super().__init__(trn_data, tst_data, dh, *args, **kwargs)
         self.clf = LogisticRegression(penalty="none", random_state=42, max_iter=max_iter)
         self.weights = None
         self._model = self.clf
+        self._trn_data = trn_data
+        self._tst_data = tst_data
 
     @property
     def _weights(self) -> np.array:
@@ -207,6 +210,9 @@ class LRHelper(ModelHelper):
     def predict_proba(self, X, *args, **kwargs):
         return self.clf.predict_proba(X)
 
+    def accuracy(self, X_test, y_test, *args, **kwargs) -> float:
+        return sklearn.metrics.accuracy_score(y_test, self.predict(X_test, *args, **kwargs))
+
     def grp_accuracy(self, X: np.array, Beta: np.array, y: np.arange, *args, **kwargs) -> dict:  
         beta_dim = len(Beta[0])
         res_dict = {}
@@ -215,8 +221,11 @@ class LRHelper(ModelHelper):
             res_dict[beta_id] = self.accuracy(X[beta_samples], y[beta_samples])
         return res_dict
 
-
-class RecourseHelper(ModelHelper):
+class SynRecourse(ModelHelper, ABC):
+    """
+    This is a base class for all models that provide recourse to our Synthetic dataset.
+    Donot instantiate objects out of tjis class.
+    """
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
         super().__init__(trn_data, tst_data, dh, *args, **kwargs)
         
@@ -247,6 +256,155 @@ class RecourseHelper(ModelHelper):
             {'params': self.rec_model.parameters()},
         ], lr=self._lr)
 
+        self.cls_optimizer = AdamW([
+            {'params': self._model.parameters()},
+        ], lr=self._lr)
+
+        self.def_dir = None
+        self.def_name = None
+
+
+    @abstractmethod
+    def fit_epoch(self, epoch, loader=None, *args, **kwargs):
+        raise NotImplementedError()
+
+
+    def entropy_bias(self, loader=None, epochs=5):
+        self.rec_model.train()
+        if loader is None:
+            loader = self.trn_loader
+
+        step = 0
+        target = torch.tensor(torch.ones(self.batch_size, self._Xdim)).to(cu.get_device())
+        target = target / self._Xdim
+
+        for epoch in range(epochs):
+            tq = tqdm(total=len(loader), desc="Loss")
+            for id, x, _, _, beta in loader:
+                step += 1
+                x, beta = x.to(cu.get_device()), beta.to(cu.get_device())
+                self.rec_optimizer.zero_grad()
+
+                y_preds = self.rec_model(x, beta)
+                y_preds = torch.softmax(y_preds, dim=1)
+                y_preds = torch.log(y_preds)
+
+                loss = self._KLCriterion(y_preds, target)
+                loss.backward()
+                self.rec_optimizer.step()
+                self._sw.add_scalar("Ent-Prior", loss.item(), step)
+                tq.set_description(f"Lossh: {loss.item()}")
+                tq.update(1)
+
+    def accuracy(self, X_test = None, y_test=None, *args, **kwargs) -> float:
+        if X_test is None:
+            X_test = self._tst_data._X
+            y_test = self._tst_data._0INDy
+            kwargs["Beta"] = self._tst_data._Beta
+        return super().accuracy(X_test, y_test, *args, **kwargs)
+
+    def grp_accuracy(self, X_test: np.array = None, Beta_test: np.array = None, y_test: np.arange=None, *args, **kwargs) -> dict:
+        if X_test is None:
+            X_test = self._tst_data._X
+            y_test = self._tst_data._0INDy
+            Beta_test = self._tst_data._Beta
+        res_dict = {}
+        for beta_id in range(self._Betadim):
+            beta_samples = np.where(Beta_test[:, beta_id] == 1)
+            kwargs = {"Beta": Beta_test[beta_samples]}
+            res_dict[beta_id] = self.accuracy(X_test[beta_samples], y_test[beta_samples], **kwargs)
+        return res_dict
+
+    def recourse_accuracy(self):
+        loader = self.tst_loader
+
+        self.rec_model.eval()
+        sum_acc = 0
+        with torch.no_grad():
+            for id, x, y, z, beta in loader:
+                x, y, z, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), z.to(cu.get_device()), beta.to(cu.get_device())
+                rec_beta = self.rec_model(x, beta)
+                rec_beta = rec_beta > 0.5
+                x_rec = torch.mul(z, rec_beta)
+                acc = self.accuracy(x_rec.cpu().numpy(), y.cpu().numpy(), Beta=rec_beta.cpu().numpy())
+                sum_acc += acc
+        return sum_acc / len(loader)
+
+    
+    def predict(self, X, *args, **kwargs) -> np.array:
+        self._model.eval()
+        Beta = kwargs["Beta"]
+        X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
+        with torch.no_grad():
+            y_preds = self._model.forward(X, Beta)
+        y_preds = torch.softmax(y_preds, dim=1)
+        y_preds = torch.argmax(y_preds, dim=1)
+        return y_preds.cpu().numpy()
+
+    def predict_proba(self, X, *args, **kwargs) -> np.array:
+        self._model.eval()
+        Beta = kwargs["Beta"]
+        X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
+        with torch.no_grad():
+            y_preds = self._model.forward(X, Beta)
+        y_preds = torch.softmax(y_preds, dim=1)
+        return y_preds.cpu().numpy()
+
+    def predict_betas(self, X, Beta) -> np.array:
+        self.rec_model.eval()
+        X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
+        with torch.no_grad():
+            pred_beta = self.rec_model.forward(X, Beta)
+            pred_beta = torch.sigmoid(pred_beta)
+        return pred_beta.cpu().numpy()
+
+    @property
+    def _def_dir(self):
+        raise self.def_dir
+    @_def_dir.setter
+    def _def_dir(self, value):
+        self.def_dir = value
+    
+    @property
+    def _def_name(self):
+        return self.def_name
+    @_def_name.setter
+    def _def_name(self, value):
+        self.def_name = value
+    
+    def save_model_defname(self, suffix = ""):
+        state_dict = {
+            "recourse": self.rec_model.state_dict(),
+            "classifier": self._model.state_dict()
+        }
+        dir = self._def_dir
+        dir.mkdir(exist_ok=True, parents=True)
+        torch.save(state_dict, self._def_dir / (self._def_name + suffix + ".pt"))
+    
+    def load_model_defname(self, suffix=""):
+        state_dict = torch.load(self._def_dir / (self._def_name + suffix + ".pt"), map_location=cu.get_device())
+        self._model.load_state_dict(state_dict["classifier"])
+        self.rec_model.load_state_dict(state_dict["recourse"])
+        print(f"Models loader from {str(self._def_dir / (self._def_name + suffix + '.pt'))}")
+
+    def load_def_classifier(self, suffix=""):
+        fname = f"{self._def_dir}/nn_cls/{str(self.dh)}/classifier{suffix}.pt"
+        print(f"Loaded NN_cls classifier from {str(fname)}")
+        self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
+
+    def save_rec_model(self, suffix=""):
+        fname = self._def_dir / f"rec_model{suffix}.pt"
+        torch.save(self.rec_model.state_dict(), fname)
+    
+    def load_rec_model(self, suffix=""):
+        fname = self._def_dir() / f"rec_model{suffix}.pt"
+        self.rec_model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
+
+
+
+class BaselineHelper(SynRecourse):
+    def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
+        super(BaselineHelper, self).__init__(trn_data, tst_data, dh, *args, **kwargs)
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         
@@ -330,131 +488,7 @@ class RecourseHelper(ModelHelper):
             tq.update(1)
 
 
-    def entropy_bias(self, loader=None, epochs=5):
-        self.rec_model.train()
-        if loader is None:
-            loader = self.trn_loader
-
-        step = 0
-        target = torch.tensor(torch.ones(self.batch_size, self._Xdim)).to(cu.get_device())
-        target = target / self._Xdim
-
-        for epoch in range(epochs):
-            tq = tqdm(total=len(loader), desc="Loss")
-            for id, x, _, _, beta in loader:
-                step += 1
-                x, beta = x.to(cu.get_device()), beta.to(cu.get_device())
-                self.rec_optimizer.zero_grad()
-
-                y_preds = self.rec_model(x, beta)
-                y_preds = torch.softmax(y_preds, dim=1)
-                y_preds = torch.log(y_preds)
-
-                loss = self._KLCriterion(y_preds, target)
-                loss.backward()
-                self.rec_optimizer.step()
-                self._sw.add_scalar("Ent-Prior", loss.item(), step)
-                tq.set_description(f"Lossh: {loss.item()}")
-                tq.update(1)
-
-    def accuracy(self, X_test = None, y_test=None, *args, **kwargs) -> float:
-        if X_test is None:
-            X_test = self._tst_data._X
-            y_test = self._tst_data._0INDy
-            kwargs["Beta"] = self._tst_data._Beta
-        return super().accuracy(X_test, y_test, *args, **kwargs)
-
-    def grp_accuracy(self, X_test: np.array = None, Beta_test: np.array = None, y_test: np.arange=None, *args, **kwargs) -> dict:
-        if X_test is None:
-            X_test = self._tst_data._X
-            y_test = self._tst_data._0INDy
-            Beta_test = self._tst_data._Beta
-        res_dict = {}
-        for beta_id in range(self._Betadim):
-            beta_samples = np.where(Beta_test[:, beta_id] == 1)
-            kwargs = {"Beta": Beta_test[beta_samples]}
-            res_dict[beta_id] = self.accuracy(X_test[beta_samples], y_test[beta_samples], **kwargs)
-        return res_dict
-
-    def ent_pretrn_acc(self):
-        loader = self.tst_loader
-
-        self.rec_model.eval()
-        crcts = 0
-        with torch.no_grad():
-            for id, x, y, z, beta in loader:
-                x, y, z, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), z.to(cu.get_device()), beta.to(cu.get_device())
-                rec_beta = self.rec_model(x, beta)
-                rec_beta = rec_beta > 0.5
-                x_rec = torch.mul(z, rec_beta)
-                acc = self.accuracy(x_rec.cpu().numpy(), y.cpu().numpy(), Beta=rec_beta.cpu().numpy())
-                crcts += acc
-        return crcts / len(loader)
-
-    
-    def predict(self, X, *args, **kwargs) -> np.array:
-        self._model.eval()
-        Beta = kwargs["Beta"]
-        X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
-        with torch.no_grad():
-            y_preds = self._model.forward(X, Beta)
-        y_preds = torch.softmax(y_preds, dim=1)
-        y_preds = torch.argmax(y_preds, dim=1)
-        return y_preds.cpu().numpy()
-
-    def predict_proba(self, X, *args, **kwargs) -> np.array:
-        self._model.eval()
-        Beta = kwargs["Beta"]
-        X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
-        with torch.no_grad():
-            y_preds = self._model.forward(X, Beta)
-        y_preds = torch.softmax(y_preds, dim=1)
-        return y_preds.cpu().numpy()
-
-    def predict_betas(self, X, Beta) -> np.array:
-        self.rec_model.eval()
-        X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
-        with torch.no_grad():
-            pred_beta = self.rec_model.forward(X, Beta)
-            pred_beta = torch.sigmoid(pred_beta)
-        return pred_beta.cpu().numpy()
-
-    def get_defdir(self):
-        return super().get_defdir() / "recourse" / str(self.dh)
-    
-    def get_defname(self):
-        return "recourse_theta_phi"
-    
-    def save_model_defname(self, suffix = ""):
-        state_dict = {
-            "recourse": self.rec_model.state_dict(),
-            "classifier": self._model.state_dict()
-        }
-        dir = self.get_defdir()
-        dir.mkdir(exist_ok=True, parents=True)
-        torch.save(state_dict, self.get_defdir() / (self.get_defname() + suffix + ".pt"))
-    
-    def load_model_defname(self, suffix=""):
-        state_dict = torch.load(self.get_defdir() / (self.get_defname() + suffix + ".pt"), map_location=cu.get_device())
-        self._model.load_state_dict(state_dict["classifier"])
-        self.rec_model.load_state_dict(state_dict["recourse"])
-        print(f"Models loader from {str(self.get_defdir() / self.get_defname())}")
-
-    def load_def_classifier(self, suffix=""):
-        fname = f"{super().get_defdir()}/nn_cls/{str(self.dh)}/classifier{suffix}.pt"
-        print(f"Loaded NN_cls classifier from {str(fname)}")
-        self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
-
-    def save_rec_model(self, suffix=""):
-        fname = self.get_defdir() / f"rec_model{suffix}.pt"
-        torch.save(self.rec_model.state_dict(), fname)
-    
-    def load_rec_model(self, suffix=""):
-        fname = self.get_defdir() / f"rec_model{suffix}.pt"
-        self.rec_model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
-
-
-class Method1Helper(RecourseHelper):
+class Method1Helper(BaselineHelper):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
         super().__init__(trn_data, tst_data, dh, nn_arch=nn_arch, *args, **kwargs)
     
@@ -487,7 +521,10 @@ class Method1Helper(RecourseHelper):
                 util, max_idxs = torch.max(cls_out, dim=0)
                 util = torch.sum(util)
 
-                if beta[max_idxs[0]][0] != 1:
+                if beta[max_idxs][0] != 1 and epoch > 5:
+                    # print(f"Found {beta}")
+                    # print(torch.exp(cls_out))
+                    continue
                     pass
                 
                 util_grp += util
@@ -499,24 +536,10 @@ class Method1Helper(RecourseHelper):
             tq.set_description(f"Loss: {loss.item()}")
             tq.update(1)
 
-class NNHelper(ModelHelper):
+class NNHelper(SynRecourse):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
         super().__init__(trn_data, tst_data, dh, *args, **kwargs)
-        
-        self.cls_nn_arch:list = deepcopy(nn_arch)
-        self.cls_nn_arch.append(self._nclasses)
-        kwargs = {
-            "prefix": "classifier_"
-        }
-        self._model = FNN(in_dim=self._Xdim+self._Betadim, nn_arch=self.cls_nn_arch, **kwargs)
-        self._model.to(cu.get_device())
-        cu.init_weights(self._model)
-
-        self._optimizer = AdamW([
-            {'params': self._model.parameters()},
-        ], lr=self._lr)
-        self._criterion = nn.CrossEntropyLoss()
-
+    
 
     def fit_epoch(self, epoch, loader=None):
         self._model.train()
@@ -541,52 +564,3 @@ class NNHelper(ModelHelper):
             self._sw.add_scalar("Loss", loss.item(), step)
             tq.set_description(f"Loss: {loss.item()}")
             tq.update(1)
-    
-    def accuracy(self, X_test, y_test, *args, **kwargs) -> float:
-        return super().accuracy(X_test, y_test, *args, **kwargs)
-
-    def grp_accuracy(self, X: np.array, Beta: np.array, y: np.arange, *args, **kwargs) -> dict:
-        res_dict = {}
-        for beta_id in range(self._Betadim):
-            beta_samples = np.where(Beta[:, beta_id] == 1)
-            kwargs = {"Beta": Beta[beta_samples]}
-            res_dict[beta_id] = self.accuracy(X[beta_samples], y[beta_samples], **kwargs)
-        return res_dict
-    
-    def predict(self, X, *args, **kwargs) -> np.array:
-        self._model.eval()
-        Beta = kwargs["Beta"]
-        X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
-        with torch.no_grad():
-            y_preds = self._model.forward(X, Beta)
-        y_preds = torch.softmax(y_preds, dim=1)
-        y_preds = torch.argmax(y_preds, dim=1)
-        return y_preds.cpu().numpy()
-
-    def predict_proba(self, X, *args, **kwargs) -> np.array:
-        self._model.eval()
-        Beta = kwargs["Beta"]
-        X, Beta = torch.Tensor(X).to(cu.get_device()), torch.Tensor(Beta).to(cu.get_device())
-        with torch.no_grad():
-            y_preds = self._model.forward(X, Beta)
-        y_preds = torch.softmax(y_preds, dim=1)
-        return y_preds.cpu().numpy()
-
-    def get_defdir(self):
-        return super().get_defdir() / "nn_cls" / str(self.dh)
-    
-    def get_defname(self):
-        return "classifier"
-    
-    def save_model_defname(self, suffix=""):
-        dir = self.get_defdir()
-        dir.mkdir(exist_ok=True, parents=True)
-        torch.save(self._model.state_dict(), dir / (self.get_defname() + suffix + ".pt"))
-    
-    def load_model_defname(self, suffix=""):
-        state_dict = torch.load(self.get_defdir() / (self.get_defname() + suffix + ".pt"), map_location=cu.get_device())
-        self._model.load_state_dict(state_dict)
-        print(f"Models loader from {str(self.get_defdir()/(self.get_defname() + suffix + '.pt'))}")
-
-
-
