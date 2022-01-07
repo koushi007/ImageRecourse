@@ -434,12 +434,11 @@ class BaselineHelper(SynRecourse):
                 # this is P(\beta_ir | ij)
                 rec_beta = self.rec_model.forward(x, beta)
                 rec_beta = torch.sigmoid(rec_beta)
-                rec_beta = torch.log(rec_beta + 1e-5)
 
                 rec_beta_agg = rec_beta.repeat_interleave(num_grp, dim=0)
                 beta_agg = beta.repeat(num_grp, 1)
-                rec_beta_loss = torch.mul(beta_agg, torch.log(rec_beta_agg + 1e-5)) + torch.mul(1-beta_agg, torch.log(1-rec_beta_agg+1e-5))
-                rec_beta_loss = torch.sum(rec_beta_agg, dim=1)
+                rec_beta_loss = torch.mul(beta_agg, torch.log(rec_beta_agg+1e-5)) + torch.mul(1-beta_agg, torch.log(1-rec_beta_agg+1e-5))
+                rec_beta_loss = torch.sum(rec_beta_loss, dim=1)
 
                 cls_out = self._model.forward(x, beta)
                 cls_out = torch.softmax(cls_out, dim=1)
@@ -510,14 +509,11 @@ class BaselineKLHelper(SynRecourse):
                 
                 # this is P(\beta_ir | ij)
                 rec_beta = self.rec_model.forward(x, beta)
-                # rec_beta = torch.sigmoid(rec_beta)
                 rec_beta = torch.softmax(rec_beta, dim=1)
                 rec_beta = torch.log(rec_beta + 1e-5)
 
                 rec_beta_agg = rec_beta.repeat_interleave(num_grp, dim=0)
                 beta_agg = beta.repeat(num_grp, 1)
-                # rec_beta_loss = torch.mul(beta_agg, torch.log(rec_beta_agg + 1e-5)) + torch.mul(1-beta_agg, torch.log(1-rec_beta_agg+1e-5))
-                # rec_beta_loss = torch.sum(rec_beta_agg, dim=1)
 
                 rec_beta_loss_ir = -self._KLCriterion(reduction="none")(rec_beta_agg, beta_agg / torch.sum(beta_agg, dim=1).view(-1, 1))
                 rec_beta_loss_uni = self._KLCriterion(reduction="none")(rec_beta_agg, uni_kl_targets)

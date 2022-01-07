@@ -125,8 +125,8 @@ for epoch in range(num_epochs):
 
         print(f"Recourse Accuracy is: {rh.recourse_accuracy()}")
 
-rh.save_model_defname(suffix=suffix)
-rh.load_model_defname(suffix=suffix)
+rh.save_model_defname()
+rh.load_model_defname()
 
 cu.set_seed(42)
 print(f"train accuracy = {rh.accuracy(train._X, train._0INDy, Beta=train._Beta)}")
