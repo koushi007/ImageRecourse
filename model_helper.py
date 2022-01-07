@@ -360,7 +360,7 @@ class SynRecourse(ModelHelper, ABC):
 
     @property
     def _def_dir(self):
-        raise self.def_dir
+        return self.def_dir
     @_def_dir.setter
     def _def_dir(self, value):
         self.def_dir = value
@@ -388,7 +388,7 @@ class SynRecourse(ModelHelper, ABC):
         print(f"Models loader from {str(self._def_dir / (self._def_name + suffix + '.pt'))}")
 
     def load_def_classifier(self, suffix=""):
-        fname = f"{self._def_dir}/nn_cls/{str(self.dh)}/classifier{suffix}.pt"
+        fname = f"results/models/nn_cls/{str(self.dh)}/classifier{suffix}.pt"
         print(f"Loaded NN_cls classifier from {str(fname)}")
         self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
@@ -397,14 +397,89 @@ class SynRecourse(ModelHelper, ABC):
         torch.save(self.rec_model.state_dict(), fname)
     
     def load_rec_model(self, suffix=""):
-        fname = self._def_dir() / f"rec_model{suffix}.pt"
+        fname = self._def_dir / f"rec_model{suffix}.pt"
         self.rec_model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
-
-
 
 class BaselineHelper(SynRecourse):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
-        super(BaselineHelper, self).__init__(trn_data, tst_data, dh, *args, **kwargs)
+        super(BaselineHelper, self).__init__(trn_data, tst_data, dh, nn_arch, *args, **kwargs)
+
+        self._def_dir = Path(f"results/models/baseline/{str(self.dh)}")
+        self._def_name = "baseline"
+
+    def fit_epoch(self, epoch, loader=None, *args, **kwargs):
+        
+        inter_iters = -1
+        if "interleave_iters" in kwargs:
+            inter_iters = kwargs["interleave_iters"]
+
+        self._model.train()
+        self.rec_model.train()
+
+        if loader is None:
+            loader = self.grp_trn_loader
+        
+        global_step = epoch * len(loader)
+        tq = tqdm(total=len(loader), desc="Loss")
+
+        num_grp = self.dh._train.B_per_i
+        
+        for local_step, (id_grp, X_grp, y_grp, Z_grp, Beta_grp) in enumerate(loader):
+            util_grp = 0
+            for id, x, y, z, beta in zip(id_grp, X_grp, y_grp, Z_grp, Beta_grp):
+                
+                x, y, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
+                self._optimizer.zero_grad()
+                
+                # this is P(\beta_ir | ij)
+                rec_beta = self.rec_model.forward(x, beta)
+                rec_beta = torch.sigmoid(rec_beta)
+                rec_beta = torch.log(rec_beta + 1e-5)
+
+                rec_beta_agg = rec_beta.repeat_interleave(num_grp, dim=0)
+                beta_agg = beta.repeat(num_grp, 1)
+                rec_beta_loss = torch.mul(beta_agg, torch.log(rec_beta_agg + 1e-5)) + torch.mul(1-beta_agg, torch.log(1-rec_beta_agg+1e-5))
+                rec_beta_loss = torch.sum(rec_beta_agg, dim=1)
+
+                cls_out = self._model.forward(x, beta)
+                cls_out = torch.softmax(cls_out, dim=1)
+                cls_out = torch.gather(cls_out, 1, y.view(-1, 1)).squeeze()
+                cls_out = torch.log(cls_out + 1e-5)
+                cls_loss = cls_out.repeat(num_grp)
+
+                if inter_iters != -1:
+                    if (local_step % (2*inter_iters)) % inter_iters == 0:
+                        do_rec, do_cls = 0, 1
+                    else:
+                        do_rec, do_cls = 1, 0
+                else:
+                    do_rec, do_cls = 1, 1
+                util = (do_rec * rec_beta_loss) + (do_cls * cls_loss)
+
+                util = util.view(num_grp, -1)
+                util, max_idxs = torch.max(util, dim=0)
+                util = torch.sum(util)
+                
+                util_grp += util
+
+            cls_loss_sw = torch.gather(cls_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
+            rec_loss_sw = torch.gather(rec_beta_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
+            self._sw.add_scalar("cls_loss", torch.mean(cls_loss_sw), global_step+local_step)
+            self._sw.add_scalar("rec_loss", torch.mean(rec_loss_sw), global_step+local_step)
+
+            loss = -util_grp/len(X_grp)
+            loss.backward()
+            self._optimizer.step()
+            self._sw.add_scalar("Loss", loss.item(), global_step+local_step)
+            tq.set_description(f"Loss: {loss.item()}")
+            tq.update(1)
+
+class BaselineKLHelper(SynRecourse):
+    def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
+        super(BaselineKLHelper, self).__init__(trn_data, tst_data, dh, nn_arch, *args, **kwargs)
+
+        self._def_dir = Path(f"results/models/klbaseline/{str(self.dh)}")
+        self._def_name = "baselinekl"
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         
@@ -460,12 +535,13 @@ class BaselineHelper(SynRecourse):
                 cls_out = torch.log(cls_out + 1e-5)
                 cls_loss = cls_out.repeat(num_grp)
 
-                do_rec, do_cls = 0, 0
                 if inter_iters != -1:
                     if (local_step % (2*inter_iters)) % inter_iters == 0:
-                        do_cls = 1
+                        do_rec, do_cls = 0, 1
                     else:
-                        do_rec = 1
+                        do_rec, do_cls = 1, 0
+                else:
+                    do_rec, do_cls = 1, 1
                 util = (do_rec * rec_beta_loss) + (do_cls * cls_loss)
 
                 util = util.view(num_grp, -1)
@@ -487,11 +563,13 @@ class BaselineHelper(SynRecourse):
             tq.set_description(f"Loss: {loss.item()}")
             tq.update(1)
 
-
-class Method1Helper(BaselineHelper):
+class Method1Helper(SynRecourse):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
         super().__init__(trn_data, tst_data, dh, nn_arch=nn_arch, *args, **kwargs)
-    
+
+        self._def_dir = Path(f"results/models/method1/{str(self.dh)}")
+        self._def_name = "method1"
+
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
 
         print("Training Method 1")
@@ -538,8 +616,10 @@ class Method1Helper(BaselineHelper):
 
 class NNHelper(SynRecourse):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
-        super().__init__(trn_data, tst_data, dh, *args, **kwargs)
-    
+        super().__init__(trn_data, tst_data, dh, nn_arch, *args, **kwargs)
+
+        self._def_dir = Path(f"results/models/nn_cls/{str(self.dh)}")
+        self._def_name = "classifier"
 
     def fit_epoch(self, epoch, loader=None):
         self._model.train()

@@ -5,7 +5,7 @@ from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
 import utils.common_utils as cu
 from data_helper import SyntheticDataHelper
-from model_helper import LRHelper, Method1Helper, ModelHelper, NNHelper, BaselineHelper
+from model_helper import BaselineHelper, LRHelper, Method1Helper, ModelHelper, NNHelper, BaselineKLHelper
 import sys
 
 
@@ -14,12 +14,15 @@ cu.set_seed(42)
 cu.set_cuda_device(0)
 
 # Run configs
-pretrn_cls = True # should i load the pretrained classifier?
-fit_kwargs = {"interleave_iters": 10} # ho many iterations of interleaved cls/recourse model is needed?
+pretrn_cls = False # should i load the pretrained classifier?
+fit_kwargs = {"interleave_iters": -1} # ho many iterations of interleaved cls/recourse model is needed?
 rec_method = "baseline"
 suffix = rec_method
 num_epochs = 20
 print_stats_epoch = True
+pretrn_entrpy = False
+
+print(f"Training {rec_method} with pretrained classifier set to {pretrn_cls} for {num_epochs} epochs")
 
 # Dataset HyperParameters
 dim=10 
@@ -82,14 +85,16 @@ train, test = sdh._train, sdh._test
 
 # %% Recourse Model
 sw = SummaryWriter(log_dir=f"tblogs/{str(sdh)}/{rec_method}")
-kwargs = {
+rec_kwargs = {
     "summarywriter": sw,
     "batch_size": 50,
 }
 if rec_method == "baseline":
-    rh = BaselineHelper(trn_data=train, tst_data=test, dh=sdh, **kwargs)
+    rh = BaselineHelper(trn_data=train, tst_data=test, dh=sdh, **rec_kwargs)
+elif rec_method == "baselinekl":
+    rh  =BaselineKLHelper(trn_data=train, tst_data=test, dh=sdh, **rec_kwargs)
 elif rec_method == "method1":
-    rh = Method1Helper(trn_data=train, tst_data=test, dh=sdh, **kwargs)
+    rh = Method1Helper(trn_data=train, tst_data=test, dh=sdh, **rec_kwargs)
 else:
     raise NotImplementedError(f"Recourse method: {rec_method} is not supported")
 
@@ -97,9 +102,12 @@ if pretrn_cls:
     rh.load_def_classifier(suffix="-final")
     print(f"Sanity check pretrained classifier: {rh.accuracy()}")
 
+if pretrn_entrpy:
+    rh.entropy_bias(epochs=1)
+
 print("Fititng the Recourse Classifier")
 for epoch in range(num_epochs):
-    rh.fit_epoch(epoch)
+    rh.fit_epoch(epoch, **fit_kwargs)
     
     acc = rh.accuracy(test._X, test._0INDy, Beta=test._Beta)
     rh._sw.add_scalar("Epoch_Acc", acc, epoch)
