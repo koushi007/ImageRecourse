@@ -6,8 +6,8 @@ from sklearn.linear_model import LogisticRegression
 import sklearn
 from torch._C import dtype
 from torch.types import Number
-from FNN import FNN
-from data_helper import Data, DataHelper, SyntheticDataHelper
+from baseline.FNN import FNN
+from baseline.data_helper import Data, DataHelper, SyntheticDataHelper
 import utils.common_utils as cu
 import torch
 import torch.utils.data as data_utils
@@ -128,7 +128,7 @@ class ModelHelper(ABC):
 
     @property
     def _def_dir(self):
-        return Path("results/models")
+        return Path("results/models/baseline")
 
 
 
@@ -388,7 +388,7 @@ class SynRecourse(ModelHelper, ABC):
         print(f"Models loader from {str(self._def_dir / (self._def_name + suffix + '.pt'))}")
 
     def load_def_classifier(self, suffix=""):
-        fname = f"results/models/nn_cls/{str(self.dh)}/classifier{suffix}.pt"
+        fname = f"results/models/baseline/nn_cls/{str(self.dh)}/classifier{suffix}.pt"
         print(f"Loaded NN_cls classifier from {str(fname)}")
         self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
@@ -404,7 +404,7 @@ class BaselineHelper(SynRecourse):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
         super(BaselineHelper, self).__init__(trn_data, tst_data, dh, nn_arch, *args, **kwargs)
 
-        self._def_dir = Path(f"results/models/baseline/{str(self.dh)}")
+        self._def_dir = Path(f"results/models/baseline/baseline/{str(self.dh)}")
         self._def_name = "baseline"
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
@@ -477,7 +477,7 @@ class BaselineKLHelper(SynRecourse):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
         super(BaselineKLHelper, self).__init__(trn_data, tst_data, dh, nn_arch, *args, **kwargs)
 
-        self._def_dir = Path(f"results/models/klbaseline/{str(self.dh)}")
+        self._def_dir = Path(f"results/models/baseline/klbaseline/{str(self.dh)}")
         self._def_name = "baselinekl"
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
@@ -563,7 +563,7 @@ class Method1Helper(SynRecourse):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
         super().__init__(trn_data, tst_data, dh, nn_arch=nn_arch, *args, **kwargs)
 
-        self._def_dir = Path(f"results/models/method1/{str(self.dh)}")
+        self._def_dir = Path(f"results/models/baseline/method1/{str(self.dh)}")
         self._def_name = "method1"
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
@@ -614,7 +614,7 @@ class NNHelper(SynRecourse):
     def __init__(self, trn_data, tst_data, dh, nn_arch=[10, 10], *args, **kwargs) -> None:
         super().__init__(trn_data, tst_data, dh, nn_arch, *args, **kwargs)
 
-        self._def_dir = Path(f"results/models/nn_cls/{str(self.dh)}")
+        self._def_dir = Path(f"results/models/baseline/nn_cls/{str(self.dh)}")
         self._def_name = "classifier"
 
     def fit_epoch(self, epoch, loader=None):

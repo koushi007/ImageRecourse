@@ -4,8 +4,8 @@ import torch as torch
 from torch import nn
 from torch.utils.tensorboard.writer import SummaryWriter
 import utils.common_utils as cu
-from data_helper import SyntheticDataHelper
-from model_helper import BaselineHelper, LRHelper, Method1Helper, ModelHelper, NNHelper, BaselineKLHelper
+from baseline.data_helper import SyntheticDataHelper
+from baseline.model_helper import BaselineHelper, LRHelper, Method1Helper, ModelHelper, NNHelper, BaselineKLHelper
 import sys
 
 
@@ -44,7 +44,7 @@ sdh = SyntheticDataHelper(dim=dim, prior=prior, num_train=num_train, B_per_i=B_p
 train, test = sdh._train, sdh._test
 
 
-# %% LR Model
+# # %% LR Model
 # lr_cls = LRHelper(trn_data=train, tst_data=test, dh=sdh, max_iter=100)
 # lr_cls.fit()
 # print(f"Raw Train Accuracy: {lr_cls.accuracy(train._X, train._0INDy)}")
@@ -56,8 +56,8 @@ train, test = sdh._train, sdh._test
 
 
 
-# %% NN ClS model
-# sw = SummaryWriter(log_dir=f"tblogs/{str(sdh)}/nn_cls")
+# # %% NN ClS model
+# sw = SummaryWriter(log_dir=f"baseline/tblogs/{str(sdh)}/nn_cls")
 # kwargs = {
 #     "summarywriter": sw,
 #     "batch_size": 50,
@@ -84,7 +84,7 @@ train, test = sdh._train, sdh._test
 
 
 # %% Recourse Model
-sw = SummaryWriter(log_dir=f"tblogs/{str(sdh)}/{rec_method}")
+sw = SummaryWriter(log_dir=f"baseline/tblogs/{str(sdh)}/{rec_method}")
 rec_kwargs = {
     "summarywriter": sw,
     "batch_size": 50,

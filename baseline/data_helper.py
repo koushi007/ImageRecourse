@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod, abstractproperty
 import numpy as np
 import abc
 import utils.common_utils as cu
-import data.syn_dataset as synds
+import baseline.data.syn_dataset as synds
 import torch
 import torch.utils.data as data_utils
 
@@ -20,8 +20,6 @@ class Data(ABC):
         self.Z = Z
         self.Beta = Beta
         self.B_per_i = B_per_i
-        self.classifier = None 
-        self.Rho = None
         self.num_classes = len(set(y))
         self.classes = set(y)
 
