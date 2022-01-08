@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod, abstractproperty
+from threading import local
 from typing import List
 import numpy as np
 import abc
@@ -15,7 +16,7 @@ class Data(ABC):
     For rho, if we regress logits, we have probabilities
     If we decide to regress loss, then we have losses
     """
-    def __init__(self, X, y, Z, Beta, B_per_i, siblings, instance_ids) -> None:
+    def __init__(self, X, y, Z, Beta, B_per_i, siblings, Z_ids) -> None:
         super().__init__()
         self.X = X
         self.y = y
@@ -23,13 +24,19 @@ class Data(ABC):
         self.Beta = Beta
         self.B_per_i = B_per_i
         self.siblings = siblings
-        self.instance_ids = instance_ids
+        self.Z_ids = Z_ids
         self.num_classes = len(set(y))
         self.classes = set(y)
 
+        self.data_ids = np.arange(len(X))
+
     @property
-    def _instance_ids(self) -> np.array:
-        return self.instance_ids
+    def _data_ids(self) -> np.array:
+        return self.data_ids
+
+    @property
+    def _Z_ids(self) -> np.array:
+        return self.Z_ids
 
     @property
     def _X(self) -> np.array:
@@ -71,39 +78,26 @@ class Data(ABC):
             raise ValueError("Why are u calling siblings on the test/val data?")
         return self.siblings
     
-    def get_instances(self, instance_ids:np.array):
+    def get_instances(self, data_ids:np.array):
         """[summary]
 
         Args:
-            instance_ids (np.array): [description]
+            data_ids (np.array): [description]
 
         Returns:
-            local_idxs, X, y, Z, Beta
+            X, y, Z, Beta in order
         """
-        if type(instance_ids) == type([]):
-            instance_ids = np.aray(instance_ids)
-        assert type(instance_ids) == type([]), "We expect even a scalar index to be passed as an array"
-        idxs = np.array([np.where(self._instance_ids == entry) for entry in instance_ids])
-        return idxs, self.get_ins_by_idxs(idxs)
+        if type(data_ids) == type([]):
+            data_ids = np.array(data_ids)
+        return self._X[data_ids], self._y[data_ids], self._Z[data_ids], self._Beta[data_ids]
     
-    def get_ins_by_idxs(self, idxs:np.array):
-        if type(idxs) == type([]):
-            idxs = np.array(idxs)
-        return self._X[idxs], self._y[idxs], self._Z[idxs], self._Beta[idxs]
+    def get_siblings_intances(self, data_ids):
+        if type(data_ids) == type([]):
+            data_ids = np.aray(data_ids)
+        assert type(data_ids) == type(np.array([1])), "We expect even a scalar index to be passed as an array"
+        return self._siblings[data_ids]
     
-    def get_siblings_intances(self, instance_ids):
-        if type(instance_ids) == type([]):
-            instance_ids = np.aray(instance_ids)
-        assert type(instance_ids) == type(np.array([1])), "We expect even a scalar index to be passed as an array"
-        idxs = np.array([np.where(self._instance_ids == entry) for entry in instance_ids])
-        return idxs, self._siblings[idxs]
-    
-    def get_siblings_by_idxs(self, idxs:np.array):
-        if type(idxs) == type([]):
-            idxs = np.aray(idxs)
-        assert type(idxs) == type(np.array([1])), "We expect even a scalar index to be passed as an array"
-        return idxs, self._siblings[idxs]
-    
+
     # some useful functions
     @property
     def _num_data(self):
@@ -125,14 +119,15 @@ class Data(ABC):
     def apply_recourse(self, data_id, betas):
         raise NotImplementedError()
 
-    def init_loader(self, ids, X, y, Z, Beta, shuffle=True, batch_size=None):
+    def init_loader(self, data_ids, Z_ids, X, y, Z, Beta, shuffle=True, batch_size=None):
         T = torch.Tensor
-        dataset = data_utils.TensorDataset(T(ids), T(X), T(y), T(Z), T(Beta))
+        dataset = data_utils.TensorDataset(T(data_ids), T(Z_ids), T(X), T(y), T(Z), T(Beta))
         return data_utils.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
-    def init_grp_loader(self, ids, X, y, Z, Beta, shuffle=True, batch_size=None):
+    def init_grp_loader(self, data_ids, Z_ids, X, y, Z, Beta, shuffle=True, batch_size=None):
+        raise NotImplementedError("When u use this API, check its sanity once")
         grp_arr = lambda arr : np.array(np.split(arr, int(len(arr) / self.B_per_i)))
-        return self.init_loader(grp_arr(ids), grp_arr(X), grp_arr(y), grp_arr(Z), grp_arr(Beta), 
+        return self.init_loader(grp_arr(data_ids), grp_arr(Z_ids), grp_arr(X), grp_arr(y), grp_arr(Z), grp_arr(Beta), 
                                 shuffle=shuffle, batch_size=int(batch_size / self._B_per_i))
 
     @abc.abstractmethod
@@ -143,30 +138,27 @@ class Data(ABC):
     def get_grp_loader(self, shuffle, bsz):
         raise NotImplementedError()
 
-
-
 class SyntheticData(Data):
-    def __init__(self, X, y, Z, Beta, B_per_i, siblings, instance_ids) -> None:
-        super(SyntheticData, self).__init__(X, y, Z, Beta, B_per_i, siblings, instance_ids)
-        
+    def __init__(self, X, y, Z, Beta, B_per_i, siblings, Z_ids) -> None:
+        super(SyntheticData, self).__init__(X, y, Z, Beta, B_per_i, siblings, Z_ids)
     
-    def apply_recourse_instances(self, instance_ids, betas:np.array):
+    def apply_recourse(self, data_ids, betas:np.array):
         """Applies recourse to the specified data is and returns the recoursed x
         Args:
-            data_id ([type]): [description]
+            data_ids ([type]): [description]
             betas ([type]): [description]
         Returns:
             [type]: [description]
         """
-        _, _, z, _ = self.get_instances(instance_ids)
+        _, _, z, _ = self.get_instances(data_ids)
         assert z.shape() == betas.shape(), "Why the hell are the shapes inconsistent?"
         return np.multiply(z, betas)
     
     def get_loader(self, shuffle, bsz):
-        return self.init_loader(self._instance_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
+        return self.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
     
     def get_grp_loader(self, shuffle, bsz):
-        return self.init_grp_loader(self._instance_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
+        return self.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
 
 class DataHelper(ABC):
     def __init__(self, train, test, val) -> None:
@@ -195,7 +187,6 @@ class DataHelper(ABC):
     @_val.setter
     def _val(self, value):
         self.val = value
-
 
 class SyntheticDataHelper(DataHelper):
     def __init__(self, train, test, val) -> None:
