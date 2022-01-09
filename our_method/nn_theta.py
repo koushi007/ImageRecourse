@@ -45,6 +45,7 @@ class NNthHelper(ABC):
         self.tst_loader = self._dh._test.get_loader(shuffle=False, bsz=self._batch_size)
         self.val_loader = self._dh._val.get_loader(shuffle=False, bsz=self._batch_size)
 
+# %% properties
     @property
     def _model(self):
         return self.model
@@ -123,28 +124,6 @@ class NNthHelper(ABC):
     def _def_dir(self):
         return Path("our_method/results/syn/models")
 
-    @abstractproperty
-    def _def_name(self):
-        raise NotImplementedError()
-
-    def copy_model(self, *args, **kwargs):
-        """Stores a copy of the model
-        """
-        assert self.__model_copy is None, "Why are you copying an alreasy copied model?"
-        self.__model_copy = deepcopy(self._model.state_dict())
-    
-    def apply_copied_model(self, *args, **kwargs):
-        """Loads the weights of deep copied model to the origibal model
-        """
-        assert self.__model_copy != None
-        self.model.load_state_dict(self.__model_copy)
-
-    def clear_copied_model(self, *args, **kwargs):
-        """[summary]
-        """
-        assert self.__model_copy is not None, "Why are you clearing an already cleared copy?"
-        self.__model_copy = None
-
     @property
     def _lr(self):
         return self.lr
@@ -164,6 +143,28 @@ class NNthHelper(ABC):
     @property
     def _msecri_perex(self):
         return nn.MSELoss(reduction="none")
+
+# %% Abstract methods delegated to my children
+
+    @abstractproperty
+    def _def_name(self):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def fit_data(self, loader:data_utils.DataLoader=None, trn_wts=None,
+                        epochs=None, steps=None, *args, **kwargs):
+        """fits the data on the Dataloader that is passed
+
+        Args:
+            loader (data_utils.DataLoader, optional): [description]. Defaults to None.
+            trn_wts ([type], optional): [description]. Defaults to None.
+            epochs ([type], optional): [description]. Defaults to None.
+            steps ([type], optional): [description]. Defaults to None.
+
+        Raises:
+            NotImplementedError: [description]
+        """
+        raise NotImplementedError()
 
     @abstractmethod
     def predict_labels(self, X):
@@ -192,6 +193,26 @@ class NNthHelper(ABC):
         """    
         raise NotImplementedError
 
+# %% some utilities
+
+    def copy_model(self, *args, **kwargs):
+        """Stores a copy of the model
+        """
+        assert self.__model_copy is None, "Why are you copying an alreasy copied model?"
+        self.__model_copy = deepcopy(self._model.state_dict())
+    
+    def apply_copied_model(self, *args, **kwargs):
+        """Loads the weights of deep copied model to the origibal model
+        """
+        assert self.__model_copy != None
+        self.model.load_state_dict(self.__model_copy)
+
+    def clear_copied_model(self, *args, **kwargs):
+        """[summary]
+        """
+        assert self.__model_copy is not None, "Why are you clearing an already cleared copy?"
+        self.__model_copy = None
+
     def accuracy(self, X_test, y_test, *args, **kwargs) -> float:
         """Returns the Accuracy of predictions
 
@@ -203,6 +224,27 @@ class NNthHelper(ABC):
             Accuracy
         """
         return accuracy_score(y_test, self.predict_labels(X_test, *args, **kwargs))
+
+    def grp_accuracy(self, X_test=None, y_test=None, Beta_test=None, *args, **kwargs) -> dict:
+        """Computes the accuracy on a per group basis
+
+        Args:
+            X_test ([type]): [description]
+            y_test ([type]): [description]
+            Beta_test ([type]): [description]
+
+        Returns:
+            dict: [description]
+        """
+        if X_test is None:
+            X_test, y_test, Beta_test = self._tst_data._X, self._tst_data._y, self._tst_data._Beta
+        beta_dim = self._trn_data._Betadim
+        res_dict = {}
+        for beta_id in range(beta_dim):
+            beta_samples = np.where(Beta_test[:, beta_id] == 1)
+            res_dict[beta_id] = self.accuracy(X_test[beta_samples], y_test[beta_samples])
+        return res_dict
+
 
     def get_loss_perex(self, X_test, y_test):
         """Gets the cross entropy loss per example
@@ -237,6 +279,17 @@ class NNthHelper(ABC):
         probs = self.predict_proba(X_test)
         return self._xecri(T(probs).to(cu.get_device()), y_test).cpu().numpy()
 
+    def save_model_defname(self, suffix=""):
+        dir = self._def_dir
+        dir.mkdir(exist_ok=True, parents=True)
+        fname = dir / f"{self._def_name}{suffix}.pt"
+        torch.save(self._model.state_dict(), fname)
+    
+    def load_model_defname(self, suffix=""):
+        fname = self._def_dir / f"{self._def_name}{suffix}.pt"
+        print(f"Loaded model from {str(fname)}")
+        self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
+
 class LRHelper(NNthHelper):  
     def __init__(self, in_dim, n_classes, dh:ourdh.DataHelper, *args, **kwargs) -> None:
         self.in_dim = in_dim
@@ -252,15 +305,12 @@ class LRHelper(NNthHelper):
             {'params': self._model.parameters()},
         ], lr=self._lr)
         
-    def fit_data(self, loader:data_utils.DataLoader=None, subset_idxs=None, trn_wts=None,
+    def fit_data(self, loader:data_utils.DataLoader=None, trn_wts=None,
                         epochs=None, steps=None, *args, **kwargs):
         """fits the data on the Dataloader that is passed
-        We wish that you dont pass the subsetids and manipulate everything using the trn_wts
-
 
         Args:
             loader (data_utils.DataLoader): [description]
-            subset_idxs ([type], optional): [description]. Defaults to None. Sunset of idxs on which you wish to perform the minimization.
             trn_wts ([type], optional): [description]. Defaults to None. weights to be associated with each traning sample.
             epochs ([type], optional): [description]. Defaults to None. 
             steps ([type], optional): [description]. Defaults to None.
@@ -280,10 +330,6 @@ class LRHelper(NNthHelper):
 
         if loader is None:
             loader = self._trn_loader
-        else:
-            raise NotImplementedError("If your intention is to use raw trnloader \
-                only, be careful when u pass the loader yourself. I dont see now why you \
-                will pass a loader other than the trnloader.")
 
         if trn_wts is None:
             trn_wts = np.ones(len(loader.dataset))
@@ -337,14 +383,3 @@ class LRHelper(NNthHelper):
     @property
     def _def_name(self):
         return "nntheta_lr"
-
-    def save_model_defname(self, suffix=""):
-        dir = self._def_dir
-        dir.mkdir(exist_ok=True, parents=True)
-        fname = dir / f"{self._def_name}{suffix}.pt"
-        torch.save(self._model.state_dict(), fname)
-    
-    def load_model_defname(self, suffix=""):
-        fname = self._def_dir / f"{self._def_name}{suffix}.pt"
-        print(f"Loaded model from {str(fname)}")
-        self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))

@@ -36,15 +36,24 @@ class Recourse(ABC):
         self.bsz = 64
         self.lr = 1e-3
 
-        # self.pretrn_theta = deepcopy(nnth._model.state_dict())
+        self.R = []
+        self.Sij = None
+        self.trn_wts = np.ones(self.dh._train._num_data)
+
         self.__init_kwargs(kwargs)
+        self.set_Sij()
 
     def __init_kwargs(self, kwargs):
         if "batch_size" in kwargs:
             self.bsz = kwargs["batch_size"]
         if "lr" in kwargs:
             self.lr = kwargs["lr"]
-        
+
+    def init_trn_wts(self):
+        for rid in self.R:
+            self.trn_wts = self.simulate_addr(trn_wts=self.trn_wts, R=self.R, rid=rid)
+
+# %% Some properties      
     @property
     def _nnth(self):
         return self.nnth
@@ -91,6 +100,13 @@ class Recourse(ABC):
     def _batch_size(self):
         return self.bsz
 
+    @property
+    def _def_dir(self):
+        return Path("our_method/results/syn/models")
+    
+
+# %% some utility functions
+
     def minze_theta(self, rbg_loader, ex_trnwts):
         """Minimizes Theta on the specified data loader
         This does a weighted ERM
@@ -99,6 +115,7 @@ class Recourse(ABC):
             rbg_loader ([type]): [description]
             ex_trnwts ([type]): [description]
         """
+        self._nnth._model.train()
         for sgd_epoch in range(self._grad_steps):
             for data_ids, zids, x, y, z, b in rbg_loader:
                 data_ids, x, y = data_ids.to(cu.get_device(), dtype=torch.int64), x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64)
@@ -110,24 +127,6 @@ class Recourse(ABC):
 
                 loss.backward()
                 self._SGD_optim.step()
-
-
-    # Some utilitu functions
-    def _pretrn_theta(self):
-        raise NotImplementedError("This may not be required?")
-        return self.pretrn_theta
-
-    @abstractmethod
-    def recourse_theta(self, *args, **kwargs):
-        self.R = []
-        self.set_Sij()
-
-    @property
-    def _def_dir(self):
-        return Path("our_method/results/syn/models")
-    @abstractproperty
-    def _def_name(self):
-        raise NotImplementedError()
 
     def sample_bad_ex(self, R:list, num_ex=None):
         """Returns the examples that have the highest loss.
@@ -255,54 +254,6 @@ class Recourse(ABC):
         return np.mean(bdexlosses)
 
 
-class SynRecourse(Recourse):
-    def __init__(self, nnth: NNthHelper, dh: DataHelper, budget, grad_steps=10, num_badex=100, *args, **kwargs) -> None:
-        super().__init__(nnth, dh, budget, grad_steps=grad_steps, num_badex=num_badex, *args, **kwargs)
-    
-    @property
-    def _def_name(self):
-        return "recourse"
-
-    def recourse_theta(self, *args, **kwargs):
-        super().recourse_theta(args, kwargs)
-
-        trnd = self._dh._train
-
-        def sanity_asserts():
-            for r in self.R:
-                Sijz = [trnd._Z_ids[entry] for entry in self.Sij[r]]
-                assert len(set(Sijz)) == 1, "All the recourse examples should belong to the same object"
-                assert Sijz[0] == trnd._Z_ids[r], "The Z_id of r and sij should b consistent"
-
-        # in the begining, all examples have equal loss weights
-        trn_wts = np.ones(trnd._num_data)
-
-        for r_iter in range(self._budget):
-
-            bad_exs = self.sample_bad_ex(self.R)
-
-            rbg_ids, bdX, bdy, rbg_loader = self.sample_R_Bd_Gd(self.R, bad_ids=bad_exs, num_req=None, prop=[1,1,2])
-            init_loss = self._nnth.get_loss(bdX, bdy)
-
-            bad_losses = self.assess_R_candidates(trn_wts, self.R, bad_exs, rbg_loader)
-
-            sel_r = bad_exs[np.argmin(bad_losses)]
-
-            self.R.append(sel_r)
-            trn_wts = self.simulate_addr(trn_wts, self.R, sel_r)
-            
-            # self._nnth.copy_model()
-            self.minze_theta(rbg_loader, torch.Tensor(trn_wts).to(cu.get_device()))
-            # We will use this Theta going forward as we have already freesed an element in Recourse
-            # self._nnth.clear_copied_model()
-            self.set_Sij()
-
-            rec_loss = self._nnth.get_loss(bdX, bdy)
-
-            print(f"Inside R iteration {r_iter}; init Loss = {init_loss}; R Loss = {rec_loss}")
-
-        return np.array(self.R), self.Sij
-
     def dump_recourse_state_defname(self, suffix=""):
         dir = self._def_dir
         torch.save(self._nnth._model.state_dict(), dir / f"{self._def_name}{suffix}-nnth.pt")
@@ -317,5 +268,92 @@ class SynRecourse(Recourse):
         with open(dir/f"{self._def_name}{suffix}-R.pkl", "rb") as file:
             self.R = pkl.load(file)
         print(f"Loaded Recourse from {dir}/{self._def_name}{suffix}")
+
+        # Update the Sij based on the new model
+        self.set_Sij()
+        # Derive the trained weights in accoredance with R and set them
+        self.init_trn_wts()
+
+# %% Abstract methods delegated to my children
+    @abstractmethod
+    def recourse_theta(self, *args, **kwargs):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def nnth_rfit(self, epochs, *args, **kwargs):
+        """nnth_rfit for recourse fit
+        This function should be called after recourse.
+        Here we fit the nn_theta model on a weighted loss.
+        The weights are as decided by the trn_wts here
+        We only finetune on the weighted loss
+
+        Raises:
+            NotImplementedError: [description]
+
+        Returns:
+            [type]: [description]
+        """
+        raise NotImplementedError()
+
+    @abstractproperty
+    def _def_name(self):
+        raise NotImplementedError()
+
+
+
+    
+
+class SynRecourse(Recourse):
+    def __init__(self, nnth: NNthHelper, dh: DataHelper, budget, grad_steps=10, num_badex=100, *args, **kwargs) -> None:
+        super().__init__(nnth, dh, budget, grad_steps=grad_steps, num_badex=num_badex, *args, **kwargs)
+    
+    @property
+    def _def_name(self):
+        return "recourse"
+
+    def recourse_theta(self, *args, **kwargs):
+
+        trnd = self._dh._train
+
+        def sanity_asserts():
+            for r in self.R:
+                Sijz = [trnd._Z_ids[entry] for entry in self.Sij[r]]
+                assert len(set(Sijz)) == 1, "All the recourse examples should belong to the same object"
+                assert Sijz[0] == trnd._Z_ids[r], "The Z_id of r and sij should b consistent"
+
+        # in the begining, all examples have equal loss weights
+        self.trn_wts = np.ones(trnd._num_data)
+
+        for r_iter in range(self._budget):
+
+            bad_exs = self.sample_bad_ex(self.R)
+
+            rbg_ids, bdX, bdy, rbg_loader = self.sample_R_Bd_Gd(self.R, bad_ids=bad_exs, num_req=None, prop=[1,1,2])
+            init_loss = self._nnth.get_loss(bdX, bdy)
+
+            bad_losses = self.assess_R_candidates(self.trn_wts, self.R, bad_exs, rbg_loader)
+
+            sel_r = bad_exs[np.argmin(bad_losses)]
+
+            self.R.append(sel_r)
+            self.trn_wts = self.simulate_addr(self.trn_wts, self.R, sel_r)
+            
+            # self._nnth.copy_model()
+            self.minze_theta(rbg_loader, torch.Tensor(self.trn_wts).to(cu.get_device()))
+            # We will use this Theta going forward as we have already freesed an element in Recourse
+            # self._nnth.clear_copied_model()
+            self.set_Sij()
+
+            rec_loss = self._nnth.get_loss(bdX, bdy)
+
+            print(f"Inside R iteration {r_iter}; init Loss = {init_loss}; R Loss = {rec_loss}")
+
+        return np.array(self.R), self.Sij
+
+    def nnth_rfit(self, epochs, *args, **kwargs):
+        # TODO: maybe we can move this also to ther parent?
+        self._nnth.fit_data(loader = self._nnth._trn_loader, 
+                            trn_wts=self.trn_wts,
+                            epochs=epochs)
 
     
