@@ -290,12 +290,12 @@ class NNthHelper(ABC):
         print(f"Loaded model from {str(fname)}")
         self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
-class LRHelper(NNthHelper):  
+class LRNNthHepler(NNthHelper):  
     def __init__(self, in_dim, n_classes, dh:ourdh.DataHelper, *args, **kwargs) -> None:
         self.in_dim = in_dim
         self.n_classes = n_classes
         model = LRModel(in_dim=in_dim, n_classes=n_classes, args=args, kwargs=kwargs)
-        super(LRHelper, self).__init__(model, dh, args, kwargs)
+        super(LRNNthHepler, self).__init__(model, dh, args, kwargs)
 
         cu.init_weights(self._model)
         self._model.to(cu.get_device())

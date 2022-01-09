@@ -42,7 +42,17 @@ def init_loader(data_ids, Z_ids, X, y, Z, Beta, shuffle=True, batch_size=None):
         return data_utils.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
 def init_grp_loader(data_ids, Z_ids, X, y, Z, Beta, B_per_i, shuffle=True, batch_size=None):
-    raise NotImplementedError("When u use this API, check its sanity once")
-    grp_arr = lambda arr : np.array(np.split(arr, int(len(arr) / self.B_per_i)))
-    return self.init_loader(grp_arr(data_ids), grp_arr(Z_ids), grp_arr(X), grp_arr(y), grp_arr(Z), grp_arr(Beta), 
+    grp_arr = lambda arr : np.array(np.split(arr, int(len(arr) / B_per_i)))
+    return init_loader(grp_arr(data_ids), grp_arr(Z_ids), grp_arr(X), grp_arr(y), grp_arr(Z), grp_arr(Beta), 
                             shuffle=shuffle, batch_size=int(batch_size / B_per_i))
+
+def generic_init_loader(*args, **kwargs):
+    """This is a generic init loader. We just create a dataset of any which crap u send to us
+    Use the above init_loader to ensure some discipline.
+    But pls pass batch size and shuffle as keargs in the very least
+    """
+    shuffle = kwargs["shuffle"]
+    bsz = kwargs["batch_size"]
+    T = torch.Tensor
+    dataset = data_utils.TensorDataset(*[T(entry) for entry in args])
+    return data_utils.DataLoader(dataset, shuffle=shuffle, batch_sampler=bsz)

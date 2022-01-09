@@ -21,7 +21,7 @@ import torch
 from pathlib import Path
 import pickle as pkl
 
-class Recourse(ABC):
+class RecourseHelper(ABC):
     def __init__(self, nnth:NNthHelper, dh:DataHelper, budget, grad_steps=10, num_badex=100, *args, **kwargs) -> None:
         super().__init__()
         self.nnth = nnth
@@ -88,6 +88,17 @@ class Recourse(ABC):
     @_num_badex.setter
     def _num_badex(self, value):
         self.num_badex = value
+
+    @property
+    def _Sij(self):
+        return self.Sij
+    @_Sij.setter
+    def _Sij(self, value):
+        self.Sij = value
+
+    @property
+    def _R(self):
+        return self.R
 
     @property
     def _SGD_optim(self):
@@ -300,10 +311,7 @@ class Recourse(ABC):
         raise NotImplementedError()
 
 
-
-    
-
-class SynRecourse(Recourse):
+class SynRecourseHelper(RecourseHelper):
     def __init__(self, nnth: NNthHelper, dh: DataHelper, budget, grad_steps=10, num_badex=100, *args, **kwargs) -> None:
         super().__init__(nnth, dh, budget, grad_steps=grad_steps, num_badex=num_badex, *args, **kwargs)
     
@@ -317,7 +325,7 @@ class SynRecourse(Recourse):
 
         def sanity_asserts():
             for r in self.R:
-                Sijz = [trnd._Z_ids[entry] for entry in self.Sij[r]]
+                Sijz = [trnd._Z_ids[entry] for entry in self._Sij[r]]
                 assert len(set(Sijz)) == 1, "All the recourse examples should belong to the same object"
                 assert Sijz[0] == trnd._Z_ids[r], "The Z_id of r and sij should b consistent"
 
@@ -348,7 +356,7 @@ class SynRecourse(Recourse):
 
             print(f"Inside R iteration {r_iter}; init Loss = {init_loss}; R Loss = {rec_loss}")
 
-        return np.array(self.R), self.Sij
+        return np.array(self.R), self._Sij
 
     def nnth_rfit(self, epochs, *args, **kwargs):
         # TODO: maybe we can move this also to ther parent?

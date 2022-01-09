@@ -46,7 +46,7 @@ if nn_theta == "LR":
     lr_kwargs = {
         "lr": 1e-2
     }
-    nnth_mh = ournnth.LRHelper(in_dim=train_data._Xdim, 
+    nnth_mh = ournnth.LRNNthHepler(in_dim=train_data._Xdim, 
                         n_classes=train_data._num_classes,
                         dh = sdh, 
                         **lr_kwargs)
@@ -66,16 +66,17 @@ cu.dict_print(nnth_mh.grp_accuracy())
 
 # %% Synthetic Recourse
 cu.set_seed()
-synR = ourr.SynRecourse(nnth_mh, sdh, budget=500, grad_steps=10, num_badex=100)
+synR = ourr.SynRecourseHelper(nnth_mh, sdh, budget=500, grad_steps=10, num_badex=100)
 # synR.recourse_theta()
 # print(f"Accuracy on last step of Recourse: {synR._nnth.accuracy()}")
 # synR.dump_recourse_state_defname()
 
 synR.load_recourse_state_defname()
 print(f"Accuracy after loading the recourse model is: {synR._nnth.accuracy()}")
-synR.nnth_rfit(epochs=1)
-print(f"Accuracy after finetuning nntheta on Recourse set with weighted ERM is {synR._nnth.accuracy()}")
-print(f"Grp Accuracy of the rfit finetuned model is ")
-cu.dict_print(nnth_mh.grp_accuracy())
-synR._nnth.save_model_defname(suffix="-rfit")
+# synR.nnth_rfit(epochs=1)
+# print(f"Accuracy after finetuning nntheta on Recourse set with weighted ERM is {synR._nnth.accuracy()}")
+# print(f"Grp Accuracy of the rfit finetuned model is ")
+# cu.dict_print(nnth_mh.grp_accuracy())
+# synR._nnth.save_model_defname(suffix="-rfit")
+
 
