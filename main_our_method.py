@@ -1,3 +1,4 @@
+from our_method.nn_phi import SynNNPhiMeanHelper, SynNNPhiMinHelper
 import utils.common_utils as cu
 import numpy as np
 import pickle as pkl
@@ -79,4 +80,9 @@ print(f"Accuracy after loading the recourse model is: {synR._nnth.accuracy()}")
 # cu.dict_print(nnth_mh.grp_accuracy())
 # synR._nnth.save_model_defname(suffix="-rfit")
 
+nnphHelper = SynNNPhiMinHelper(in_dim=sdh._train._Xdim+sdh._train._Betadim, out_dim=sdh._train._Betadim,
+                            nn_arch=[10, 6], rechlpr=synR, dh=sdh)
+nnphHelper.fit_rec_beta(epochs=10)
+pred_betas, aft_acc, bef_acc = nnphHelper.recourse_accuracy(sdh._test._X, sdh._test._y, sdh._test._Z, sdh._test._Beta)
+print(f"Accuracy Before = {bef_acc}; After = {aft_acc}; pred_betas: {np.sum(pred_betas, axis=0)}")
 

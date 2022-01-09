@@ -151,11 +151,11 @@ class Data(ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def get_loader(self, shuffle, bsz):
+    def get_loader(self, shuffle, batch_size):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def get_grp_loader(self, shuffle, bsz):
+    def get_grp_loader(self, shuffle, batch_size):
         raise NotImplementedError()
 
 class SyntheticData(Data):

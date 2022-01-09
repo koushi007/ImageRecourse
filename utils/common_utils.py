@@ -55,4 +55,4 @@ def generic_init_loader(*args, **kwargs):
     bsz = kwargs["batch_size"]
     T = torch.Tensor
     dataset = data_utils.TensorDataset(*[T(entry) for entry in args])
-    return data_utils.DataLoader(dataset, shuffle=shuffle, batch_sampler=bsz)
+    return data_utils.DataLoader(dataset, shuffle=shuffle, batch_size=bsz)
