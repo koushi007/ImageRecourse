@@ -94,16 +94,6 @@ class Data(ABC):
     def apply_recourse(self, data_id, betas):
         raise NotImplementedError()
 
-    def init_loader(self, ids, X, y, Z, Beta, shuffle=True, batch_size=None):
-        T = torch.Tensor
-        dataset = data_utils.TensorDataset(T(ids), T(X), T(y), T(Z), T(Beta))
-        return data_utils.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
-
-    def init_grp_loader(self, ids, X, y, Z, Beta, shuffle=True, batch_size=None):
-        grp_arr = lambda arr : np.array(np.split(arr, int(len(arr) / self.B_per_i)))
-        return self.init_loader(grp_arr(ids), grp_arr(X), grp_arr(y), grp_arr(Z), grp_arr(Beta), 
-                                shuffle=shuffle, batch_size=int(batch_size / self._B_per_i))
-
     @abc.abstractmethod
     def get_loader(self, shuffle, bsz):
         raise NotImplementedError()
@@ -131,10 +121,10 @@ class SyntheticData(Data):
         return np.multiply(z, betas)
     
     def get_loader(self, shuffle, bsz):
-        return self.init_loader(self._data_ids, self._X, self._0INDy, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
+        return cu.init_loader(self._data_ids, self._X, self._0INDy, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
     
     def get_grp_loader(self, shuffle, bsz):
-        return self.init_grp_loader(self._data_ids, self._X, self._0INDy, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
+        return cu.init_grp_loader(self._data_ids, self._X, self._0INDy, self._Z, self._Beta, self._B_per_i, shuffle=shuffle, batch_size=bsz)
 
 class DataHelper(ABC):
     def __init__(self) -> None:

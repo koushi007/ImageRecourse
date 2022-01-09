@@ -29,6 +29,7 @@ class Data(ABC):
         self.classes = set(y)
 
         self.data_ids = np.arange(len(X))
+        self.num_Z = len(set(self.Z_ids))
 
     @property
     def _data_ids(self) -> np.array:
@@ -79,7 +80,11 @@ class Data(ABC):
         return self.siblings
     
     def get_instances(self, data_ids:np.array):
-        """[summary]
+        """Returns ij data ids in order:
+            x
+            y
+            z
+            Beta
 
         Args:
             data_ids (np.array): [description]
@@ -91,6 +96,27 @@ class Data(ABC):
             data_ids = np.array(data_ids)
         return self._X[data_ids], self._y[data_ids], self._Z[data_ids], self._Beta[data_ids]
     
+    def get_Zinstances(self, zids:np.array):
+        """Finds z id of all the ij instances given in the data_ids
+        Then returns all the items in the Z group in order
+            zids
+            x
+            y
+            z
+            beta
+
+        Args:
+            data_ids (np.array): [description]
+
+        Returns:
+            X, y, Z, Beta
+        """
+        if type(zids) == type([]):
+            zids = np.array(zids)
+        zids = [np.where(self._Z_ids == entry) for entry in zids]
+        zids = np.array(zids).flatten()
+        return zids, self._X[zids], self._y[zids], self._Z[zids], self._Beta[zids]
+    
     def get_siblings_intances(self, data_ids):
         if type(data_ids) == type([]):
             data_ids = np.aray(data_ids)
@@ -101,7 +127,12 @@ class Data(ABC):
     # some useful functions
     @property
     def _num_data(self):
-        return self._X.shape[0]
+        return len(self.data_ids)
+
+    @property
+    def _num_Z(self):
+        return self.num_Z
+
     @property
     def _Xdim(self):
         return self._X.shape[1]
@@ -118,17 +149,6 @@ class Data(ABC):
     @abc.abstractmethod
     def apply_recourse(self, data_id, betas):
         raise NotImplementedError()
-
-    def init_loader(self, data_ids, Z_ids, X, y, Z, Beta, shuffle=True, batch_size=None):
-        T = torch.Tensor
-        dataset = data_utils.TensorDataset(T(data_ids), T(Z_ids), T(X), T(y), T(Z), T(Beta))
-        return data_utils.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
-
-    def init_grp_loader(self, data_ids, Z_ids, X, y, Z, Beta, shuffle=True, batch_size=None):
-        raise NotImplementedError("When u use this API, check its sanity once")
-        grp_arr = lambda arr : np.array(np.split(arr, int(len(arr) / self.B_per_i)))
-        return self.init_loader(grp_arr(data_ids), grp_arr(Z_ids), grp_arr(X), grp_arr(y), grp_arr(Z), grp_arr(Beta), 
-                                shuffle=shuffle, batch_size=int(batch_size / self._B_per_i))
 
     @abc.abstractmethod
     def get_loader(self, shuffle, bsz):
@@ -155,10 +175,11 @@ class SyntheticData(Data):
         return np.multiply(z, betas)
     
     def get_loader(self, shuffle, bsz):
-        return self.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
-    
+        return cu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
+
     def get_grp_loader(self, shuffle, bsz):
-        return self.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
+        return cu.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, self._B_per_i,
+                                     shuffle=shuffle, batch_size=bsz)
 
 class DataHelper(ABC):
     def __init__(self, train, test, val) -> None:

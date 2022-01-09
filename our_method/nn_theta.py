@@ -18,7 +18,7 @@ from our_method.data_helper import Data
 from sklearn.metrics import accuracy_score
 
 
-class ModelHelper(ABC):
+class NNthHelper(ABC):
     def __init__(self, model:nn.Module, dh:ourdh.DataHelper, *args, **kwargs) -> None:
         super().__init__()
         self.model = model
@@ -121,26 +121,28 @@ class ModelHelper(ABC):
 
     @property
     def _def_dir(self):
-        return Path("our_mrthod/results/syn/models")
+        return Path("our_method/results/syn/models")
 
     @abstractproperty
     def _def_name(self):
         raise NotImplementedError()
 
-    def copy_model(self):
+    def copy_model(self, *args, **kwargs):
         """Stores a copy of the model
         """
+        assert self.__model_copy is None, "Why are you copying an alreasy copied model?"
         self.__model_copy = deepcopy(self._model.state_dict())
     
-    def apply_copied_model(self):
+    def apply_copied_model(self, *args, **kwargs):
         """Loads the weights of deep copied model to the origibal model
         """
         assert self.__model_copy != None
         self.model.load_state_dict(self.__model_copy)
 
-    def clear_copy(self):
+    def clear_copied_model(self, *args, **kwargs):
         """[summary]
         """
+        assert self.__model_copy is not None, "Why are you clearing an already cleared copy?"
         self.__model_copy = None
 
     @property
@@ -162,7 +164,6 @@ class ModelHelper(ABC):
     @property
     def _msecri_perex(self):
         return nn.MSELoss(reduction="none")
-
 
     @abstractmethod
     def predict_labels(self, X):
@@ -191,7 +192,6 @@ class ModelHelper(ABC):
         """    
         raise NotImplementedError
 
-
     def accuracy(self, X_test, y_test, *args, **kwargs) -> float:
         """Returns the Accuracy of predictions
 
@@ -204,7 +204,40 @@ class ModelHelper(ABC):
         """
         return accuracy_score(y_test, self.predict_labels(X_test, *args, **kwargs))
 
-class LRHelper(ModelHelper):  
+    def get_loss_perex(self, X_test, y_test):
+        """Gets the cross entropy loss per example
+
+        Args:
+            X_test ([type]): [description]
+            y_test ([type]): [description]
+
+        Returns:
+            np.array of losses
+        """
+        T = torch.Tensor
+        X_test, y_test = T(X_test), T(y_test).to(cu.get_device(), dtype=torch.int64)
+        probs = self.predict_proba(X_test)
+        return self._xecri_perex(T(probs).to(cu.get_device()), y_test).cpu().numpy()
+
+    def get_loss(self, X_test, y_test):
+        """Returns the Loss of the batch
+
+        Args:
+            X_test ([type]): [description]
+            y_test ([type]): [description]
+
+        Raises:
+            NotImplementedError: [description]
+
+        Returns:
+            [type]: [description]
+        """
+        T = torch.Tensor
+        X_test, y_test = T(X_test), T(y_test).to(cu.get_device(), dtype=torch.int64)
+        probs = self.predict_proba(X_test)
+        return self._xecri(T(probs).to(cu.get_device()), y_test).cpu().numpy()
+
+class LRHelper(NNthHelper):  
     def __init__(self, in_dim, n_classes, dh:ourdh.DataHelper, *args, **kwargs) -> None:
         self.in_dim = in_dim
         self.n_classes = n_classes
@@ -298,8 +331,10 @@ class LRHelper(ModelHelper):
     def predict_proba(self, X):
         self._model.eval()
         with torch.no_grad():
-            return self._model.predict_proba(X).cpu().numpy()
+            X = torch.Tensor(X).to(cu.get_device())
+            return self._model.forward_proba(X).cpu().numpy()
 
+    @property
     def _def_name(self):
         return "nntheta_lr"
 

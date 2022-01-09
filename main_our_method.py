@@ -4,6 +4,7 @@ import pickle as pkl
 from pathlib import Path
 import our_method.data_helper as ourdh
 import our_method.nn_theta as ournnth 
+import our_method.recourse as ourr
 
 cu.set_cuda_device(0)
 cu.set_seed(42)
@@ -12,6 +13,7 @@ cu.set_seed(42)
 nn_theta = "LR"
 
 
+# %% Synthetic Dataset
 # Load the Datasets
 syndata_dir = Path("our_method/data/syn")
 with open(syndata_dir / "train_3cls.pkl", "rb") as file:
@@ -39,6 +41,7 @@ val_data = ourdh.SyntheticData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i,
 sdh = ourdh.SyntheticDataHelper(train_data, test_data, val_data)
 
 
+# %% Synthetic model
 if nn_theta == "LR":
     lr_kwargs = {
         "lr": 1e-2
@@ -47,10 +50,22 @@ if nn_theta == "LR":
                         n_classes=train_data._num_classes,
                         dh = sdh, 
                         **lr_kwargs)
-    print("nn_thets is Logistic Regression")
+    print("nn_theta is Logistic Regression")
 else:
     raise NotImplementedError()
 
-print("Fitting nn_theta")
-nnth_mh.fit_data(epochs=40)
-print(f"Accuracy after fitting nn_theta: {nnth_mh.accuracy()}")
+# print("Fitting nn_theta")
+# nnth_mh.fit_data(epochs=40)
+# print(f"Accuracy after fitting nn_theta: {nnth_mh.accuracy()}")
+# nnth_mh.save_model_defname()
+
+nnth_mh.load_model_defname()
+print(f"Accuracy of trained nn_theta: {nnth_mh.accuracy()}")
+
+
+# %% Synthetic Recourse
+cu.set_seed()
+synR = ourr.SynRecourse(nnth_mh, sdh, budget=5, grad_steps=10, num_badex=100)
+synR.recourse_theta()
+print(f"Accuracy on last step of Recourse: {synR._nnth.accuracy()}")
+synR.dump_recourse_state_defname()
