@@ -222,7 +222,6 @@ class NNPhiHelper(ABC):
             X_test, Beta_test = torch.Tensor(X_test).to(cu.get_device()), torch.Tensor(Beta_test).to(cu.get_device())
             return self._phimodel.forward(X_test, Beta_test).cpu().numpy()
 
-
     def get_loss_perex(self, X_test, y_test):
         """Gets the cross entropy loss per example
 

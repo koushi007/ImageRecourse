@@ -43,6 +43,8 @@ class ModelHelper(ABC):
 
         self.__init_kwargs(kwargs)
         self.__init_loaders()
+
+# %% inits
     
     def __init_kwargs(self, kwargs):
         if "batch_size" in kwargs:
@@ -55,6 +57,7 @@ class ModelHelper(ABC):
         self.grp_trn_loader = self._trn_data.get_grp_loader(shuffle=True, bsz=self.batch_size)
         self.tst_loader = self._tst_data.get_loader(shuffle=False, bsz=self.batch_size)
 
+# %% properties
     @property
     def _trn_data(self) -> Data:
         return self.trn_data
@@ -134,7 +137,7 @@ class ModelHelper(ABC):
     def _def_dir(self):
         return Path("baseline/results/models/baseline")
 
-
+# %% abstract methiods delegated to my children
 
     @abstractmethod
     def predict(self, X, *args, **kwargs):
@@ -154,17 +157,6 @@ class ModelHelper(ABC):
         """
         pass
 
-    def accuracy(self, X_test, y_test, *args, **kwargs) -> float:
-        """Returns the Accuracy of predictions
-
-        Args:
-            X_test ([type]): [description]
-            y_test ([type]): [description]
-
-        Returns:
-            Accuracy
-        """
-        return sklearn.metrics.accuracy_score(y_test, self.predict(X_test, *args, **kwargs))
 
     @abstractmethod
     def grp_accuracy(self, X:np.array, Beta:np.array, y:np.arange, *args, **kwargs) -> dict:
@@ -182,6 +174,21 @@ class ModelHelper(ABC):
         """
         raise NotImplementedError()
 
+# %% Some utilities
+
+    def accuracy(self, X_test, y_test, *args, **kwargs) -> float:
+        """Returns the Accuracy of predictions
+
+        Args:
+            X_test ([type]): [description]
+            y_test ([type]): [description]
+
+        Returns:
+            Accuracy
+        """
+        return sklearn.metrics.accuracy_score(y_test, self.predict(X_test, *args, **kwargs))
+
+    
 class LRHelper:
     def __init__(self, trn_data, tst_data, dh, max_iter=100, *args, **kwargs) -> None:
         super().__init__(trn_data, tst_data, dh, *args, **kwargs)

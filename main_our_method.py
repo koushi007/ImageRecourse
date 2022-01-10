@@ -84,13 +84,13 @@ print(f"Accuracy after loading the recourse model is: {synR._nnth.accuracy()}")
 
 
 # %% NNPhi
-nnphHelper = SynNNPhiMinHelper(in_dim=sdh._train._Xdim+sdh._train._Betadim, out_dim=sdh._train._Betadim,
+nnpihHelper = SynNNPhiMinHelper(in_dim=sdh._train._Xdim+sdh._train._Betadim, out_dim=sdh._train._Betadim,
                             nn_arch=[10, 6], rechlpr=synR, dh=sdh)
-# nnphHelper.fit_rec_beta(epochs=10)
-# nnphHelper.save_model_defname()
+# nnphiHelper.fit_rec_beta(epochs=10)
+# nnphiHelper.save_model_defname()
 
-nnphHelper.load_model_defname()
-pred_betas, aft_acc, bef_acc = nnphHelper.recourse_accuracy(sdh._test._X, sdh._test._y, sdh._test._Z, sdh._test._Beta)
+nnpihHelper.load_model_defname()
+pred_betas, aft_acc, bef_acc = nnpihHelper.recourse_accuracy(sdh._test._X, sdh._test._y, sdh._test._Z, sdh._test._Beta)
 print(f"Accuracy Before = {bef_acc}; After = {aft_acc}; pred_betas: {np.sum(pred_betas, axis=0)}")
 
 
@@ -108,8 +108,8 @@ print(f"Num recourse = {len(rid)}; pred_beta: {np.sum(rec_beta, axis=0)}")
 
 
 # %% Assessing three models
-raw_acc, rec_acc, rs, pred_betas = tstm.assess_th_phi_psi(dh = sdh, nnth=nnth_mh, nnph=nnphHelper, 
-                                                            nnps=nnpsiHelper)
+raw_acc, rec_acc, rs, pred_betas = tstm.assess_th_phi_psi(dh = sdh, nnth=nnth_mh, nnphi=nnpihHelper, 
+                                                            nnpsi=nnpsiHelper)
 
 print(raw_acc, rec_acc)
 
