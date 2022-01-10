@@ -382,13 +382,17 @@ class LRNNthHepler(NNthHelper):
     def predict_labels(self, X):
         self._model.eval()
         with torch.no_grad():
-            X = torch.Tensor(X).to(cu.get_device())
+            if not isinstance(X, torch.Tensor):
+                X = torch.Tensor(X).to(cu.get_device())
+            X = X.to(cu.get_device())
             return self._model.forward_labels(X).cpu().numpy()
     
     def predict_proba(self, X):
         self._model.eval()
         with torch.no_grad():
-            X = torch.Tensor(X).to(cu.get_device())
+            if not isinstance(X, torch.Tensor):
+                X = torch.Tensor(X)
+            X = X.to(cu.get_device())
             return self._model.forward_proba(X).cpu().numpy()
 
     @property

@@ -7,6 +7,7 @@ from pathlib import Path
 import our_method.data_helper as ourdh
 import our_method.nn_theta as ournnth 
 import our_method.recourse as ourr
+import our_method.test_models as tstm
 
 cu.set_cuda_device(0)
 cu.set_seed(42)
@@ -68,10 +69,10 @@ cu.dict_print(nnth_mh.grp_accuracy())
 
 # %% Synthetic Recourse
 cu.set_seed()
-synR = ourr.SynRecourseHelper(nnth_mh, sdh, budget=500, grad_steps=10, num_badex=100)
-# synR.recourse_theta()
-# print(f"Accuracy on last step of Recourse: {synR._nnth.accuracy()}")
-# synR.dump_recourse_state_defname()
+synR = ourr.SynRecourseHelper(nnth_mh, sdh, budget=2000, grad_steps=10, num_badex=100)
+synR.recourse_theta()
+print(f"Accuracy on last step of Recourse: {synR._nnth.accuracy()}")
+synR.dump_recourse_state_defname(suffix="-budget=2000")
 
 synR.load_recourse_state_defname()
 print(f"Accuracy after loading the recourse model is: {synR._nnth.accuracy()}")
@@ -81,15 +82,35 @@ print(f"Accuracy after loading the recourse model is: {synR._nnth.accuracy()}")
 # cu.dict_print(nnth_mh.grp_accuracy())
 # synR._nnth.save_model_defname(suffix="-rfit")
 
+
+# %% NNPhi
 nnphHelper = SynNNPhiMinHelper(in_dim=sdh._train._Xdim+sdh._train._Betadim, out_dim=sdh._train._Betadim,
                             nn_arch=[10, 6], rechlpr=synR, dh=sdh)
-nnphHelper.fit_rec_beta(epochs=10)
+# nnphHelper.fit_rec_beta(epochs=10)
+# nnphHelper.save_model_defname()
+
+nnphHelper.load_model_defname()
 pred_betas, aft_acc, bef_acc = nnphHelper.recourse_accuracy(sdh._test._X, sdh._test._y, sdh._test._Z, sdh._test._Beta)
 print(f"Accuracy Before = {bef_acc}; After = {aft_acc}; pred_betas: {np.sum(pred_betas, axis=0)}")
 
+
+
+# %% NNPsi
 nnpsiHelper = SynNNPsiHelper(in_dim=sdh._train._Xdim+sdh._train._Betadim, out_dim=1, nn_arch=[10, 6], 
                             rechlpr=synR, dh=sdh)
-nnpsiHelper.fit_rec_r(epochs=20)
+# nnpsiHelper.fit_rec_r(epochs=20)
+# nnpsiHelper.save_model_defname()
 
+nnpsiHelper.load_model_defname()
 rid, rec_beta = nnpsiHelper.r_acc(sdh._test._X, sdh._test._y, sdh._test._Beta)
 print(f"Num recourse = {len(rid)}; pred_beta: {np.sum(rec_beta, axis=0)}")
+
+
+
+# %% Assessing three models
+raw_acc, rec_acc, rs, pred_betas = tstm.assess_th_phi_psi(dh = sdh, nnth=nnth_mh, nnph=nnphHelper, 
+                                                            nnps=nnpsiHelper)
+
+print(raw_acc, rec_acc)
+
+print(f"Asked recourse for {np.sum(rs)} and predicted betas stats are {np.sum(pred_betas > 0.5, axis=0)}")
