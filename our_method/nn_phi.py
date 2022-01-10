@@ -1,25 +1,27 @@
-from abc import ABC, abstractmethod, abstractproperty
-from random import shuffle
 import warnings
-from torch._C import dtype
-import torch.nn as nn
-import torch
+from abc import ABC, abstractmethod, abstractproperty
 from copy import deepcopy
-import torch.optim as optim
-import our_method.data_helper as ourdh
-import torch.utils.data as data_utils
-from tqdm import tqdm
-from our_method.nn_theta import NNthHelper
-from our_method.recourse import RecourseHelper
-import utils.common_utils as cu
+from pathlib import Path
+from random import shuffle
+
 import numpy as np
+import sklearn
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.utils.data as data_utils
+import utils.common_utils as cu
+import utils.torch_utils as tu
+from sklearn.metrics import accuracy_score
 from torch.optim import SGD, AdamW
 from torch.utils.tensorboard import SummaryWriter
-from pathlib import Path
-import sklearn
-from our_method.models import FNN, LRModel
+from tqdm import tqdm
+
+import our_method.data_helper as ourdh
 from our_method.data_helper import Data
-from sklearn.metrics import accuracy_score
+from our_method.models import FNN, LRModel
+from our_method.nn_theta import NNthHelper
+from our_method.recourse import RecourseHelper
 
 
 class NNPhiHelper(ABC):
@@ -64,7 +66,7 @@ class NNPhiHelper(ABC):
         ])
         
         R_ids = np.array(self._rechlpr._R)
-        self.trn_loader = cu.generic_init_loader(R_ids, trn_X[R_ids], trn_Beta[R_ids], trn_sib_beta[R_ids], trn_Sij[R_ids], sib_losses[R_ids], 
+        self.trn_loader = tu.generic_init_loader(R_ids, trn_X[R_ids], trn_Beta[R_ids], trn_sib_beta[R_ids], trn_Sij[R_ids], sib_losses[R_ids], 
                 shuffle=True, batch_size=self._batch_size)
 
         self.tst_loader = self._dh._test.get_loader(shuffle=False, bsz=self._batch_size)
@@ -285,7 +287,7 @@ class SynNNPhiMeanHelper(NNPhiHelper):
         phimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch)
         super(SynNNPhiMeanHelper, self).__init__(phimodel, rechlpr, dh, args, kwargs)
 
-        cu.init_weights(self._phimodel)
+        tu.init_weights(self._phimodel)
         self._phimodel.to(cu.get_device())
         
 
@@ -354,7 +356,7 @@ class SynNNPhiMinHelper(NNPhiHelper):
         phimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch)
         super(SynNNPhiMinHelper, self).__init__(phimodel, rechlpr, dh, args, kwargs)
 
-        cu.init_weights(self._phimodel)
+        tu.init_weights(self._phimodel)
         self._phimodel.to(cu.get_device())
         
 

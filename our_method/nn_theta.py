@@ -1,21 +1,24 @@
 from abc import ABC, abstractmethod, abstractproperty
-from torch._C import dtype
-import torch.nn as nn
-import torch
 from copy import deepcopy
-import torch.optim as optim
-import our_method.data_helper as ourdh
-import torch.utils.data as data_utils
-from tqdm import tqdm
-import utils.common_utils as cu
+from pathlib import Path
+
 import numpy as np
+import sklearn
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.utils.data as data_utils
+import utils.common_utils as cu
+import utils.torch_utils as tu
+from sklearn.metrics import accuracy_score
+from torch._C import dtype
 from torch.optim import SGD, AdamW
 from torch.utils.tensorboard import SummaryWriter
-from pathlib import Path
-import sklearn
-from our_method.models import LRModel
+from tqdm import tqdm
+
+import our_method.data_helper as ourdh
 from our_method.data_helper import Data
-from sklearn.metrics import accuracy_score
+from our_method.models import LRModel
 
 
 class NNthHelper(ABC):
@@ -135,6 +138,14 @@ class NNthHelper(ABC):
     @property
     def _xecri_perex(self):
         return nn.CrossEntropyLoss(reduction="none")
+
+    @property
+    def _bcecri(self):
+        return nn.BCELoss()
+    
+    @property
+    def _bcecri_perex(self):
+        return nn.BCELoss(reduction="none")
     
     @property
     def _msecri(self):
@@ -297,7 +308,7 @@ class LRNNthHepler(NNthHelper):
         model = LRModel(in_dim=in_dim, n_classes=n_classes, args=args, kwargs=kwargs)
         super(LRNNthHepler, self).__init__(model, dh, args, kwargs)
 
-        cu.init_weights(self._model)
+        tu.init_weights(self._model)
         self._model.to(cu.get_device())
         
 

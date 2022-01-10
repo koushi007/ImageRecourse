@@ -1,14 +1,16 @@
+import abc
 from abc import ABC, abstractmethod, abstractproperty
 from threading import local
 from typing import List
-import numpy as np
-import abc
 
-from torch._C import Value
-import utils.common_utils as cu
 import baseline.data.syn_dataset as synds
+import numpy as np
 import torch
 import torch.utils.data as data_utils
+import utils.common_utils as cu
+import utils.torch_utils as tu
+from torch._C import Value
+
 
 class Data(ABC):
     """This is an abstract class for Dataset
@@ -175,10 +177,10 @@ class SyntheticData(Data):
         return np.multiply(z, betas)
     
     def get_loader(self, shuffle, bsz):
-        return cu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
+        return tu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
 
     def get_grp_loader(self, shuffle, bsz):
-        return cu.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, self._B_per_i,
+        return tu.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, self._B_per_i,
                                      shuffle=shuffle, batch_size=bsz)
 
 class DataHelper(ABC):

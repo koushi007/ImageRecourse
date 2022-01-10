@@ -1,4 +1,5 @@
 from our_method.nn_phi import SynNNPhiMeanHelper, SynNNPhiMinHelper
+from our_method.nn_psi import SynNNPsiHelper
 import utils.common_utils as cu
 import numpy as np
 import pickle as pkl
@@ -86,3 +87,9 @@ nnphHelper.fit_rec_beta(epochs=10)
 pred_betas, aft_acc, bef_acc = nnphHelper.recourse_accuracy(sdh._test._X, sdh._test._y, sdh._test._Z, sdh._test._Beta)
 print(f"Accuracy Before = {bef_acc}; After = {aft_acc}; pred_betas: {np.sum(pred_betas, axis=0)}")
 
+nnpsiHelper = SynNNPsiHelper(in_dim=sdh._train._Xdim+sdh._train._Betadim, out_dim=1, nn_arch=[10, 6], 
+                            rechlpr=synR, dh=sdh)
+nnpsiHelper.fit_rec_r(epochs=20)
+
+rid, rec_beta = nnpsiHelper.r_acc(sdh._test._X, sdh._test._y, sdh._test._Beta)
+print(f"Num recourse = {len(rid)}; pred_beta: {np.sum(rec_beta, axis=0)}")

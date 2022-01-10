@@ -4,22 +4,25 @@ R = set of indices that are to be recoursed.
 S_{ij} = set of indices that are used to recourse.
 """
 
-from abc import ABC, abstractmethod, abstractproperty
-from os import replace
+import heapq
+import pickle as pkl
 import warnings
-from torch._C import dtype
+from abc import ABC, abstractmethod, abstractproperty
+from copy import deepcopy
+from os import replace
+from pathlib import Path
 
+import numpy as np
+import torch
+import utils.common_utils as cu
+import utils.torch_utils as tu
+from torch._C import dtype
 from torch.optim.sgd import SGD
 from torch.utils import data
+
 from our_method.data_helper import DataHelper
-import numpy as np
 from our_method.nn_theta import NNthHelper
-from copy import deepcopy
-import heapq
-import utils.common_utils as cu
-import torch
-from pathlib import Path
-import pickle as pkl
+
 
 class RecourseHelper(ABC):
     def __init__(self, nnth:NNthHelper, dh:DataHelper, budget, grad_steps=10, num_badex=100, *args, **kwargs) -> None:
@@ -192,7 +195,7 @@ class RecourseHelper(ABC):
         rbg_zids = np.hstack((bdz_smpls, gdz_smpls))
 
         ids_smpls, X, y, Z, B = self._dh._train.get_Zinstances(rbg_zids)
-        return ids_smpls, X, y,  cu.init_loader(data_ids=ids_smpls, Z_ids=np.repeat(rbg_zids, self._dh._train._B_per_i), 
+        return ids_smpls, X, y,  tu.init_loader(data_ids=ids_smpls, Z_ids=np.repeat(rbg_zids, self._dh._train._B_per_i), 
                                                 X=X, y=y, Z=Z, Beta=B, 
                                                 shuffle=True, batch_size=self._batch_size)
 

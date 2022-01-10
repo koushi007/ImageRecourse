@@ -1,3 +1,4 @@
+from numpy.core.defchararray import index
 import torch.nn as nn
 import torch
 
@@ -35,6 +36,9 @@ class FNN(nn.Module):
             embed_arch ([type]): [description]
         """
         super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.nn_arch = nn_arch
 
         assert nn_arch[0] != in_dim and nn_arch[-1] != out_dim, "Assuming that we generally keep only bottleneck or expanding layers, this assert is in place \
             nn_arch should have only hidden layers -- no input and no output layer"
@@ -64,3 +68,9 @@ class FNN(nn.Module):
     def forward(self, x, beta):
         input = torch.cat((x, beta), dim=1)
         return self.model(input)
+
+    def forward_r(self, x, beta):
+        """Call this if the output layer needs to predict just one bit.
+        """
+        assert self.out_dim == 1, "If u need more than one output, why are u calling this?"
+        return torch.sigmoid(self.forward(x, beta)).squeeze()

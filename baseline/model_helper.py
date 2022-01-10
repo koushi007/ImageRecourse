@@ -1,22 +1,26 @@
-import numpy as np
 from abc import ABC, abstractmethod, abstractproperty
+from copy import deepcopy
+from pathlib import Path
+
+import numpy as np
+import sklearn
+import torch
+import torch.nn as nn
+import torch.utils.data as data_utils
+import utils.common_utils as cu
+import utils.torch_utils as tu
 from numpy.lib.function_base import bartlett
 from numpy.lib.npyio import load
 from sklearn.linear_model import LogisticRegression
-import sklearn
 from torch._C import dtype
-from torch.types import Number
-from baseline.FNN import FNN
-from baseline.data_helper import Data, DataHelper, SyntheticDataHelper
-import utils.common_utils as cu
-import torch
-import torch.utils.data as data_utils
-import torch.nn as nn
-from copy import deepcopy
 from torch.optim import SGD, AdamW
+from torch.types import Number
 from torch.utils.tensorboard import SummaryWriter
-from pathlib import Path
 from tqdm import tqdm
+
+from baseline.data_helper import Data, DataHelper, SyntheticDataHelper
+from baseline.FNN import FNN
+
 
 class ModelHelper(ABC):
     def __init__(self, trn_data:Data, tst_data:Data, dh:DataHelper, *args, **kwargs) -> None:
@@ -236,7 +240,7 @@ class SynRecourse(ModelHelper, ABC):
         }
         self._model = FNN(in_dim=self._Xdim+self._Betadim, nn_arch=self.cls_nn_arch, **kwargs)
         self._model.to(cu.get_device())
-        cu.init_weights(self._model)
+        tu.init_weights(self._model)
 
         self.rec_nn_arch = deepcopy(nn_arch)
         self.rec_nn_arch.append(self._Betadim)
@@ -245,7 +249,7 @@ class SynRecourse(ModelHelper, ABC):
         }
         self.rec_model = FNN(in_dim=self._Xdim+self._Betadim, nn_arch=self.rec_nn_arch, **kwargs)
         self.rec_model.to(cu.get_device())
-        cu.init_weights(self.rec_model)
+        tu.init_weights(self.rec_model)
 
         self._optimizer = AdamW([
             {'params': self._model.parameters()},
