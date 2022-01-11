@@ -53,9 +53,9 @@ class ModelHelper(ABC):
             self.sw = kwargs["summarywriter"]
 
     def __init_loaders(self):
-        self.trn_loader = self._trn_data.get_loader(shuffle=True, bsz=self.batch_size)
-        self.grp_trn_loader = self._trn_data.get_grp_loader(shuffle=True, bsz=self.batch_size)
-        self.tst_loader = self._tst_data.get_loader(shuffle=False, bsz=self.batch_size)
+        self.trn_loader = self._trn_data.get_loader(shuffle=True, batch_size=self.batch_size)
+        self.grp_trn_loader = self._trn_data.get_grp_loader(shuffle=True, batch_size=self.batch_size)
+        self.tst_loader = self._tst_data.get_loader(shuffle=False, batch_size=self.batch_size)
 
 # %% properties
     @property

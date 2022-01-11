@@ -35,7 +35,7 @@ class NNPsiHelper(ABC):
         
         self.lr = 1e-3
         self.sw = None
-        self.bsz = 16
+        self.batch_size = 16
 
         self.__init_kwargs(kwargs)
         self.__init_loaders()
@@ -46,7 +46,7 @@ class NNPsiHelper(ABC):
         if "summarywriter" in kwargs:
             self.sw = kwargs["summarywriter"]
         if "batch_size" in kwargs:
-            self.bsz = kwargs["batch_size"]
+            self.batch_size = kwargs["batch_size"]
 
     def __init_loaders(self):
         # This is very simple. We just need x, y, R in each batch. Thats all
@@ -61,8 +61,8 @@ class NNPsiHelper(ABC):
         batch_sampler = tu.MultilabelBalancedRandomSampler(trn_tgts_oh) 
         self.trn_loader = tu.generic_init_loader(trn_X, trn_Beta, trn_tgts, batch_size=self._batch_size, sampler=batch_sampler)
 
-        self.tst_loader = self._dh._test.get_loader(shuffle=False, bsz=self._batch_size)
-        self.val_loader = self._dh._val.get_loader(shuffle=False, bsz=self._batch_size)
+        self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=self._batch_size)
+        self.val_loader = self._dh._val.get_loader(shuffle=False, batch_size=self._batch_size)
 
 # %% Properties
     @property
@@ -88,7 +88,7 @@ class NNPsiHelper(ABC):
 
     @property
     def _batch_size(self):
-        return self.bsz
+        return self.batch_size
 
     @property
     def _trn_loader(self):
@@ -248,7 +248,7 @@ class SynNNPsiHelper(NNPsiHelper):
         assert (in_dim, out_dim) == (dh._train._Xdim+dh._train._Betadim, 1), "Why are the input and output dimensions fo NNPhi inconsistent?"
 
         # if u need dropouts, pass it in kwargs
-        psimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch)
+        psimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch, prefix="psi")
         super(SynNNPsiHelper, self).__init__(psimodel, rechlpr, dh, args, kwargs)
 
         tu.init_weights(self._psimodel)

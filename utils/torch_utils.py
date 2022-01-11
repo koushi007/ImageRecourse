@@ -6,9 +6,11 @@ import numpy as np
 import random
 
 def init_weights(m:nn.Module):
-    if isinstance(m, nn.Linear):
-        torch.nn.init.xavier_uniform(m.weight)
-        m.bias.data.fill_(0.01)
+    def set_params(w):
+        if isinstance(w, nn.Linear):
+            torch.nn.init.xavier_uniform(w.weight)
+            w.bias.data.fill_(0.01)
+    m.apply(set_params)
 
 def init_loader(data_ids, Z_ids, X, y, Z, Beta, shuffle=True, batch_size=None):
         T = torch.Tensor
@@ -32,8 +34,8 @@ def generic_init_loader(*args, **kwargs):
         return data_utils.DataLoader(dataset, batch_size=kwargs["batch_size"], sampler=kwargs["sampler"])
     else:
         shuffle = kwargs["shuffle"]
-        bsz = kwargs["batch_size"]
-        return data_utils.DataLoader(dataset, shuffle=shuffle, batch_size=bsz)
+        batch_size = kwargs["batch_size"]
+        return data_utils.DataLoader(dataset, shuffle=shuffle, batch_size=batch_size)
 
 
 class MultilabelBalancedRandomSampler(Sampler):

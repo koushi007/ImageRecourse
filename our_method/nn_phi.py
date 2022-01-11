@@ -33,7 +33,7 @@ class NNPhiHelper(ABC):
         
         self.lr = 1e-3
         self.sw = None
-        self.bsz = 16
+        self.batch_size = 16
 
         self.__init_kwargs(kwargs)
         self.__init_loaders()
@@ -44,7 +44,7 @@ class NNPhiHelper(ABC):
         if "summarywriter" in kwargs:
             self.sw = kwargs["summarywriter"]
         if "batch_size" in kwargs:
-            self.bsz = kwargs["batch_size"]
+            self.batch_size = kwargs["batch_size"]
 
     def __init_loaders(self):
         # Initializing train loader is fairly complicated
@@ -69,8 +69,8 @@ class NNPhiHelper(ABC):
         self.trn_loader = tu.generic_init_loader(R_ids, trn_X[R_ids], trn_Beta[R_ids], trn_sib_beta[R_ids], trn_Sij[R_ids], sib_losses[R_ids], 
                 shuffle=True, batch_size=self._batch_size)
 
-        self.tst_loader = self._dh._test.get_loader(shuffle=False, bsz=self._batch_size)
-        self.val_loader = self._dh._val.get_loader(shuffle=False, bsz=self._batch_size)
+        self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=self._batch_size)
+        self.val_loader = self._dh._val.get_loader(shuffle=False, batch_size=self._batch_size)
 
 # %% Properties
     @property
@@ -96,7 +96,7 @@ class NNPhiHelper(ABC):
 
     @property
     def _batch_size(self):
-        return self.bsz
+        return self.batch_size
 
     @property
     def _trn_loader(self):
@@ -283,7 +283,7 @@ class SynNNPhiMeanHelper(NNPhiHelper):
         assert (in_dim, out_dim) == (dh._train._Xdim+dh._train._Betadim, dh._train._Betadim), "Why are the input and output dimensions fo NNPhi inconsistent?"
 
         # if u need dropouts, pass it in kwargs
-        phimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch)
+        phimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch, prefix="phi")
         super(SynNNPhiMeanHelper, self).__init__(phimodel, rechlpr, dh, args, kwargs)
 
         tu.init_weights(self._phimodel)
@@ -352,7 +352,7 @@ class SynNNPhiMinHelper(NNPhiHelper):
         assert (in_dim, out_dim) == (dh._train._Xdim+dh._train._Betadim, dh._train._Betadim), "Why are the input and output dimensions fo NNPhi inconsistent?"
 
         # if u need dropouts, pass it in kwargs
-        phimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch)
+        phimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch, prefix="phi")
         super(SynNNPhiMinHelper, self).__init__(phimodel, rechlpr, dh, args, kwargs)
 
         tu.init_weights(self._phimodel)

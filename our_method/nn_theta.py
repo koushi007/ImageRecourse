@@ -30,7 +30,7 @@ class NNthHelper(ABC):
         
         self.lr = 1e-3
         self.sw = None
-        self.bsz = 16
+        self.batch_size = 16
 
         self.__init_kwargs(kwargs)
         self.__init_loaders()
@@ -41,12 +41,12 @@ class NNthHelper(ABC):
         if "summarywriter" in kwargs:
             self.sw = kwargs["summarywriter"]
         if "batch_size" in kwargs:
-            self.bsz = kwargs["batch_size"]
+            self.batch_size = kwargs["batch_size"]
 
     def __init_loaders(self):
-        self.trn_loader = self._dh._train.get_loader(shuffle=True, bsz=self._batch_size)
-        self.tst_loader = self._dh._test.get_loader(shuffle=False, bsz=self._batch_size)
-        self.val_loader = self._dh._val.get_loader(shuffle=False, bsz=self._batch_size)
+        self.trn_loader = self._dh._train.get_loader(shuffle=True, batch_size=self._batch_size)
+        self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=self._batch_size)
+        self.val_loader = self._dh._val.get_loader(shuffle=False, batch_size=self._batch_size)
 
 # %% properties
     @property
@@ -65,7 +65,7 @@ class NNthHelper(ABC):
 
     @property
     def _batch_size(self):
-        return self.bsz
+        return self.batch_size
 
     @property
     def _trn_loader(self):

@@ -13,7 +13,7 @@ def generate_data_3_class_dataset(d=10,
                                     total_data=6000,
                                     class_ratio_first=0.33,
                                     class_ratio_second=0.33,
-                                    samples_per_instance=10,
+                                    samples_per_instance=2,
                                     mu_first_list=None,
                                     mu_second_list=None,
                                     mu_third_list=None,
@@ -64,14 +64,13 @@ def generate_data_3_class_dataset(d=10,
     instance_number = 0
 
     if mu_first_list is None:
-        mu_first_list = [0.1,0.3,0.1,0.1,-0.3,0.1,0.1,-0.3,0.1,0.1]
-        mu_second_list = [0.1,-0.3,0.1,0.1,0.3,0.1,0.1,-0.3,0.1,0.1]
-        mu_third_list = [0.1,-0.3,0.1,0.1,-0.3,0.1,0.1,0.3,0.1,0.1]
+        mu_first_list =  [0.1, 0.3, 0.1, 0.1,-0.3, 0.1, 0.1,-0.3, 0.1, 0.1]
+        mu_second_list = [0.1,-0.3, 0.1, 0.1, 0.3, 0.1, 0.1,-0.3, 0.1, 0.1]
+        mu_third_list =  [0.1,-0.3, 0.1, 0.1,-0.3, 0.1, 0.1, 0.3, 0.1, 0.1]
 
         sigma_first_list = [0.05   for i in range(d)]
         sigma_second_list = [0.05   for i in range(d)]
         sigma_third_list = [0.05   for i in range(d)]
-        warnings.warn("We assume that the dataset must be created using default parameters")
 
     assert dump_path is not None, "Kindly provide a dump path"
 
@@ -263,35 +262,18 @@ if __name__ == "__main__":
 
     # Data generation config
     train_data = 6000
-    # Note that test_data and val_data will be divided by sample_per_instance 
-    test_data = 4000
-    val_data = 4000
-    samples_per_instance = 10
-    class_ratio_first = 1/3
-    class_ratio_second = 1/3
-    class_ratio_third = 1/3
-    mean_step_size = 0.3
-    d=10
-    r=5
 
-    mu_first_list = [0.1,0.3,0.1,0.1,-0.3,0.1,0.1,-0.3,0.1,0.1]
-    mu_second_list = [0.1,-0.3,0.1,0.1,0.3,0.1,0.1,-0.3,0.1,0.1]
-    mu_third_list = [0.1,-0.3,0.1,0.1,-0.3,0.1,0.1,0.3,0.1,0.1]
+    # Note the test set will be divided by B_per_i. So pass accordingly
+    test_data = 800
+    val_data = 800
 
-    sigma_first_list = [0.05   for i in range(d)]
-    sigma_second_list = [0.05   for i in range(d)]
-    sigma_third_list = [0.05   for i in range(d)]
-
-    syn_folder = Path("our_method/data/syn")
+    syn_folder = Path("our_method/data/syn/B=2")
+    syn_folder.mkdir(exist_ok=True, parents=True)
 
     train_path = syn_folder / "raw_train_3cls.pkl"
     test_path = syn_folder / "test_3cls.pkl"
     val_path = syn_folder / "val_3cls.pkl"
     process_train_path = syn_folder / "train_3cls.pkl"
-
-
-    R_dump_path = "final_R_3_class_3000.pkl"
-    w_b_file = "w_b_file_3_class.pkl"
 
     generate_data_3_class_dataset(total_data=train_data, data_type="train", dump_path=train_path)
     generate_data_3_class_dataset(total_data=test_data, data_type="test", dump_path=test_path)

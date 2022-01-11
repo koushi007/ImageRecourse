@@ -176,12 +176,12 @@ class SyntheticData(Data):
         assert z.shape() == betas.shape(), "Why the hell are the shapes inconsistent?"
         return np.multiply(z, betas)
     
-    def get_loader(self, shuffle, bsz):
-        return tu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=bsz)
+    def get_loader(self, shuffle, batch_size):
+        return tu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=batch_size)
 
-    def get_grp_loader(self, shuffle, bsz):
+    def get_grp_loader(self, shuffle, batch_size):
         return tu.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, self._B_per_i,
-                                     shuffle=shuffle, batch_size=bsz)
+                                     shuffle=shuffle, batch_size=batch_size)
 
 class DataHelper(ABC):
     def __init__(self, train, test, val) -> None:

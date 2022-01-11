@@ -58,4 +58,42 @@ def assess_th_phi_psi(dh:ourd.DataHelper, nnth:ourth.NNthHelper, nnphi:ourphi.NN
     return np.mean(raw_accs), np.mean(rec_accs), rs, pred_betas
 
 
+def assess_th_phi(dh:ourd.DataHelper, nnth:ourth.NNthHelper, nnphi:ourphi.NNPhiHelper, 
+                        loader:data_utils.DataLoader=None, *args, **kwargs):
+    """
+    Returns:
+        raw_acc
+        rec_acc
+        predicted_betas in order
+    """
+    cu.set_seed(42)
+    if loader is None:
+        loader = nnth._tst_loader
+    
+    nnth._model.eval()
+    nnphi._phimodel.eval()
+
+    raw_accs = []
+    rec_accs = []
+    pred_betas = []
+    with torch.no_grad():
+        for _, _, x, y, z, b in loader:
+            x, y, z, b = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), z.to(cu.get_device()), b.to(cu.get_device())
+
+            # predict beta
+            pred_b = nnphi._phimodel.forward(x, b)
+            rec_x = torch.multiply(z, pred_b)
+
+            # raw_acc
+            raw_acc = nnth.accuracy(x.cpu().numpy(), y.cpu().numpy())
+            rec_acc = nnth.accuracy(rec_x.cpu().numpy(), y.cpu().numpy())
+
+            raw_accs.append(raw_acc)
+            rec_accs.append(rec_acc)
+            pred_betas.append(pred_b.cpu().numpy())
+
+    pred_betas = np.array(pred_betas).reshape(-1, 10)
+    return np.mean(raw_accs), np.mean(rec_accs), pred_betas
+
+
 

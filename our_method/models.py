@@ -29,7 +29,7 @@ class FNN(nn.Module):
     """creates a Feed Forward Neural network with the specified Architecture
         nn ([type]): [description]
     """
-    def __init__(self, in_dim, out_dim, nn_arch, *args, **kwargs):
+    def __init__(self, in_dim, out_dim, nn_arch, prefix, *args, **kwargs):
         """Creates a basic embedding block
         Args:
             in_dim ([type]): [description]
@@ -39,14 +39,10 @@ class FNN(nn.Module):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.nn_arch = nn_arch
+        self.prefix = prefix
 
         assert nn_arch[0] != in_dim and nn_arch[-1] != out_dim, "Assuming that we generally keep only bottleneck or expanding layers, this assert is in place \
             nn_arch should have only hidden layers -- no input and no output layer"
-
-        if "prefix" in kwargs:
-            self.prefix = f"{kwargs['prefix']}_" 
-        else:
-            self.prefix = ""
 
         need_drp = False
         if "dropouts" in kwargs:
@@ -57,13 +53,13 @@ class FNN(nn.Module):
 
         prev = in_dim
         for idx, hdim in enumerate(nn_arch):
-            self.model.add_module(f"{self.prefix}emb_hid_{idx}", nn.Linear(prev, hdim))
-            self.model.add_module(f"lReLU_{idx}", nn.LeakyReLU(inplace=True))
+            self.model.add_module(f"{self.prefix}-emb_hid_{idx}", nn.Linear(prev, hdim))
+            self.model.add_module(f"{self.prefix}-lReLU_{idx}", nn.LeakyReLU(inplace=True))
             if need_drp and dropout[idx] != 1:
-                self.model.add_module(f"dropout_{idx}", nn.Dropout(p=dropout[idx]))
+                self.model.add_module(f"{self.prefix}-dropout_{idx}", nn.Dropout(p=dropout[idx]))
             prev = hdim
         
-        self.model.add_module(f"{self.prefix}last_layer", nn.Linear(prev, out_dim))
+        self.model.add_module(f"{self.prefix}-last_layer", nn.Linear(prev, out_dim))
         
     def forward(self, x, beta):
         input = torch.cat((x, beta), dim=1)

@@ -36,7 +36,7 @@ class RecourseHelper(ABC):
         self.sgd_optim = SGD([
             {"params": self._nnth._model.parameters()},
         ], lr=1e-3, momentum=0, nesterov=False)
-        self.bsz = 64
+        self.batch_size = 64
         self.lr = 1e-3
 
         self.R = []
@@ -48,7 +48,7 @@ class RecourseHelper(ABC):
 
     def __init_kwargs(self, kwargs):
         if "batch_size" in kwargs:
-            self.bsz = kwargs["batch_size"]
+            self.batch_size = kwargs["batch_size"]
         if "lr" in kwargs:
             self.lr = kwargs["lr"]
 
@@ -112,7 +112,7 @@ class RecourseHelper(ABC):
         return self.lr
     @property
     def _batch_size(self):
-        return self.bsz
+        return self.batch_size
 
     @property
     def _def_dir(self):
@@ -171,6 +171,7 @@ class RecourseHelper(ABC):
         Returns:
             sampled ids, Dataloader
         """
+        assert len(bad_ids) >= self._dh._train._B_per_i, "Pls pass atleast the required bad_ids"
         num_bdz = int(len(bad_ids)/self._dh._train._B_per_i)
         Rz = np.array(list(set(
             [self._dh._train._Z_ids[entry] for entry in R]
