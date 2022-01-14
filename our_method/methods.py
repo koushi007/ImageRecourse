@@ -253,15 +253,19 @@ class MethodsHelper(ABC):
     def _KLCriterion_rednone(self):
         return nn.KLDivLoss(reduction="none")
 
-    @property
-    def _sel_nzro(self):
+    def _sel_nzro(self, t, sij):
         sel_nonzero = lambda t, sij : torch.squeeze(t[torch.nonzero(sij)])
-        return sel_nonzero
+        res = sel_nonzero(t, sij)
+        if res.dim() == t.dim()-1:
+            res = torch.unsqueeze(res, 0)        
+        return res
     
-    @property
-    def _sel_zro(self):
+    def _sel_zro(self, t, sij):
         sel_zero = lambda t, sij : torch.squeeze(1-t[torch.nonzero(sij)])
-        return sel_zero
+        res = sel_zero(t, sij)
+        if res.dim() == t.dim()-1:
+            res = torch.unsqueeze(res, 0)        
+        return res
 
 
 # %% abstract methods
@@ -444,7 +448,7 @@ class BaselineHelper(MethodsHelper):
                 util = (do_rec * rec_beta_loss) + (do_cls * cls_loss)
 
                 util = util.view(num_grp, -1)
-                util, max_idxs = torch.max(util, dim=0)
+                util, max_idxs = torch.max(util, dim=1)
                 util = torch.sum(util)
                 
                 util_grp += util
@@ -553,7 +557,7 @@ class BaselineKLHelper(MethodsHelper):
                 util = (do_rec * rec_beta_loss) + (do_cls * cls_loss)
 
                 util = util.view(num_grp, -1)
-                util, max_idxs = torch.max(util, dim=0)
+                util, max_idxs = torch.max(util, dim=1)
                 util = torch.sum(util)
                 
                 util_grp += util
@@ -599,10 +603,6 @@ class Method1Helper(MethodsHelper):
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         
-        inter_iters = -1
-        if "interleave_iters" in kwargs:
-            inter_iters = kwargs["interleave_iters"]
-
         self._phimodel.train()
         self._thmodel.train()
 
@@ -613,75 +613,49 @@ class Method1Helper(MethodsHelper):
         tq = tqdm(total=len(loader), desc="Loss")
 
         num_grp = self.dh._train.B_per_i
-        uni_kl_targets = torch.ones(num_grp*num_grp, self._Betadim) / self._Betadim
-        uni_kl_targets = uni_kl_targets.to(cu.get_device())
-        ent_decay = torch.tensor([0.9]).to(cu.get_device())
     
         for local_step, (dataid_grp, Zid_grp, X_grp, y_grp, Z_grp, Beta_grp) in enumerate(loader):
             util_grp = 0
             for dataids, zid, x, y, z, beta in zip(dataid_grp, Zid_grp, X_grp, y_grp, Z_grp, Beta_grp):
                 
-                dataids, x, y, beta = dataids.to(cu.get_device()), x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
+                dataids, x, y, beta = dataids.to(cu.get_device(), dtype=torch.int64), x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
                 self._optim.zero_grad()
 
-
-                rec = torch.Tensor([entry in self._R for entry in dataids])
+                rec = torch.Tensor([entry in self._R for entry in dataids]).to(dtype=torch.int64)
+                num_rec = torch.sum(rec).to(dtype=torch.int64).item()
                 Sij = self._Sij[dataids]
                 rec_Sij = self._sel_nzro(Sij, rec)
-
-                # this is P(\beta_ir | ij)
-                rec_beta = self._phimodel.forward(x, beta)
-                rec_beta = torch.softmax(rec_beta, dim=1)
-                rec_beta = torch.log(rec_beta + 1e-5)
-
-                rec_beta = self._sel_nzro(rec_beta, rec)
-                rec_beta_agg = rec_beta.repeat_interleave(num_grp, dim=0)
-                
-                beta_agg = self._sel_nzro(beta, rec).repeat(num_grp, 1)
-
-                rec_beta_loss_ir = -self._KLCriterion_rednone(reduction="none")(rec_beta_agg, beta_agg / torch.sum(beta_agg, dim=1).view(-1, 1))
-                rec_beta_loss_uni = self._KLCriterion_rednone(reduction="none")(rec_beta_agg, uni_kl_targets[:rec_beta_agg.size(0)])
-
-                rec_beta_loss_ir = torch.sum(rec_beta_loss_ir, dim=1)
-                rec_beta_loss_uni = torch.sum(rec_beta_loss_uni, dim=1)
-                self._sw.add_scalar("-KL(betair || beta|xij)", torch.mean(rec_beta_loss_ir).item(), global_step+local_step)
-                self._sw.add_scalar("KL(betair|| uni)", torch.mean(rec_beta_loss_uni).item(), global_step+local_step)
-                rec_beta_loss = rec_beta_loss_ir + torch.pow(ent_decay, epoch+1) * rec_beta_loss_uni
 
                 cls_out = self._thmodel.forward(x)
                 cls_out = torch.softmax(cls_out, dim=1)
                 cls_out = torch.gather(cls_out, 1, y.view(-1, 1)).squeeze()
                 cls_out = torch.log(cls_out + 1e-5)
-                cls_loss = cls_out.repeat(num_grp)
+                util_norec = torch.sum(self._sel_zro(cls_out, rec))
 
+                util_rec = torch.Tensor([0]).to(cu.get_device())
+                if num_rec > 0:
+                    
+                    x_r, beta_r = self._sel_nzro(x, rec), self._sel_nzro(beta, rec)
+
+                    # this is P(\beta_ir | ij)
+                    rec_beta = self._phimodel.forward(x_r, beta_r)
+                    rec_beta = torch.sigmoid(rec_beta)
+
+                    rec_beta_agg = rec_beta.repeat_interleave(num_grp, dim=0)
+                    beta_agg = beta.repeat(num_rec, 1)
+                    rec_beta_util = torch.mul(beta_agg, torch.log(rec_beta_agg+1e-5)) + torch.mul(1-beta_agg, torch.log(1-rec_beta_agg+1e-5))
+                    rec_beta_util = torch.sum(rec_beta_util, dim=1)
+
+                    cls_util = cls_out.repeat(num_rec)
+
+                    sum_util_rec = cls_util + rec_beta_util
+                    sum_util_rec = sum_util_rec.view(num_grp, -1)
+
+                    for idx in range(num_rec):
+                        util_rec += torch.max(self._sel_nzro(sum_util_rec[:, idx], rec_Sij[idx]))
                 
-                
-                nr_cls_loss = self._sel_zro(cls_out, rec)
-                
-
-
-
-                if inter_iters != -1:
-                    if (local_step % (2*inter_iters)) % inter_iters == 0:
-                        do_rec, do_cls = 0, 1
-                    else:
-                        do_rec, do_cls = 1, 0
-                else:
-                    do_rec, do_cls = 1, 1
-                util = (do_rec * rec_beta_loss) + (do_cls * cls_loss)
-
-                util = util.view(num_grp, -1)
-                util, max_idxs = torch.max(util, dim=0)
-                util = torch.sum(util)
-                
-                util_grp += util
-
-                cls_loss_sw = torch.gather(cls_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
-                rec_loss_sw = torch.gather(rec_beta_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
-                self._sw.add_scalar("cls_loss", torch.mean(cls_loss_sw), global_step+local_step)
-                self._sw.add_scalar("rec_loss", torch.mean(rec_loss_sw), global_step+local_step)
-
-
+                util_grp += util_norec + util_rec
+ 
             loss = -util_grp/len(X_grp)
             loss.backward()
             self._optim.step()
@@ -689,214 +663,93 @@ class Method1Helper(MethodsHelper):
             tq.set_description(f"Loss: {loss.item()}")
             tq.update(1)
 
-# class Method2Helper(MethodsHelper):
-#     def __init__(self, dh: ourd.DataHelper, nnth: ourth.NNthHelper, nnphi: ourphi.NNPhiHelper, nnpsi: ourpsi.NNPsiHelper, rechlpr: RecourseHelper, *args, **kwargs) -> None:
-#         super().__init__(dh, nnth, nnphi, nnpsi, rechlpr, *args, **kwargs)
 
 
-        # # Set all the optimizers
-        # self._optim = optim.AdamW([
-        #     {'params': self._phimodel.parameters()},
-        #     {'params': self._thmodel.parameters()},
-        #     {'params': self._psimodel.parameters()}
-        # ], lr=self._lr)
 
+class MethodRwdHelper(MethodsHelper):
+    def __init__(self, dh: ourd.DataHelper, nnth: ourth.NNthHelper, nnphi: ourphi.NNPhiHelper, nnpsi: ourpsi.NNPsiHelper, rechlpr: RecourseHelper, *args, **kwargs) -> None:
+        super().__init__(dh, nnth, nnphi, nnpsi, rechlpr, *args, **kwargs)
 
-#         self._thoptim = optim.AdamW([
-#             {'params': self._thmodel.parameters()}
-#         ], lr = self._lr)
+        # Set all the optimizers
+        self._optim = optim.AdamW([
+            {'params': self._phimodel.parameters()},
+            {'params': self._thmodel.parameters()},
+            {'params': self._psimodel.parameters()}
+        ], lr=self._lr)
 
-#         self._phioptim = optim.AdamW([
-#             {'params': self._phimodel.parameters()}
-#         ], lr = self._lr)
+        self._thoptim = optim.AdamW([
+            {'params': self._thmodel.parameters()}
+        ], lr = self._lr)
 
-#         self._psioptim = optim.AdamW([
-#             {'params': self._psimodel.parameters()}
-#         ], lr = self._lr)
+        self._phioptim = optim.AdamW([
+            {'params': self._phimodel.parameters()}
+        ], lr = self._lr)
 
-#     def _def_name(self):
-#         return super()._def_name + "method1"
+        self._psioptim = optim.AdamW([
+            {'params': self._psimodel.parameters()}
+        ], lr = self._lr)
 
-#     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
+    def _def_name(self):
+        return super()._def_name + "baselinekl"
+
+    def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         
-#         inter_iters = -1
-#         if "interleave_iters" in kwargs:
-#             inter_iters = kwargs["interleave_iters"]
+        self._phimodel.train()
+        self._thmodel.train()
 
-#         self._phimodel.train()
-#         self._thmodel.train()
-
-#         if loader is None:
-#             loader = self._trngrp_loader
+        if loader is None:
+            loader = self._trngrp_loader
         
-#         global_step = epoch * len(loader)
-#         tq = tqdm(total=len(loader), desc="Loss")
+        global_step = epoch * len(loader)
+        tq = tqdm(total=len(loader), desc="Loss")
 
-#         num_grp = self.dh._train.B_per_i
-#         uni_kl_targets = torch.ones(num_grp*num_grp, self._Betadim) / self._Betadim
-#         uni_kl_targets = uni_kl_targets.to(cu.get_device())
-#         ent_decay = torch.tensor([0.9]).to(cu.get_device())
+        num_grp = self.dh._train.B_per_i
     
-#         for local_step, (dataid_grp, Zid_grp, X_grp, y_grp, Z_grp, Beta_grp) in enumerate(loader):
-#             util_grp = 0
-#             for dataid, zid, x, y, z, beta in zip(dataid_grp, Zid_grp, X_grp, y_grp, Z_grp, Beta_grp):
+        for local_step, (dataid_grp, Zid_grp, X_grp, y_grp, Z_grp, Beta_grp) in enumerate(loader):
+            util_grp = 0
+            for dataids, zid, x, y, z, beta in zip(dataid_grp, Zid_grp, X_grp, y_grp, Z_grp, Beta_grp):
                 
-#                 x, y, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
-#                 self._optim.zero_grad()
+                dataids, x, y, beta = dataids.to(cu.get_device(), dtype=torch.int64), x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
+                self._optim.zero_grad()
+
+                rec = torch.Tensor([entry in self._R for entry in dataids]).to(dtype=torch.int64)
+                num_rec = torch.sum(rec).to(dtype=torch.int64).item()
+                Sij = self._Sij[dataids]
+                rec_Sij = self._sel_nzro(Sij, rec)
+
+                cls_out = self._thmodel.forward(x)
+                cls_out = torch.softmax(cls_out, dim=1)
+                cls_out = torch.gather(cls_out, 1, y.view(-1, 1)).squeeze()
+                cls_out = torch.log(cls_out + 1e-5)
+                util_norec = torch.sum(self._sel_zro(cls_out, rec))
+
+                util_rec = torch.Tensor([0]).to(cu.get_device())
+                if num_rec > 0:
+                    
+                    x_r, beta_r = self._sel_nzro(x, rec), self._sel_nzro(beta, rec)
+
+                    # this is P(\beta_ir | ij)
+                    rec_beta = self._phimodel.forward(x_r, beta_r)
+                    rec_beta = torch.sigmoid(rec_beta)
+
+                    rec_beta_agg = rec_beta.repeat_interleave(num_grp, dim=0)
+                    beta_agg = beta.repeat(num_rec, 1)
+                    rec_beta_util = torch.mul(beta_agg, torch.log(rec_beta_agg+1e-5)) + torch.mul(1-beta_agg, torch.log(1-rec_beta_agg+1e-5))
+                    rec_beta_util = torch.sum(rec_beta_util, dim=1)
+
+                    cls_util = cls_out.repeat(num_rec)
+
+                    sum_util_rec = cls_util + rec_beta_util
+                    sum_util_rec = sum_util_rec.view(num_grp, -1)
+
+                    for idx in range(num_rec):
+                        util_rec += torch.max(self._sel_nzro(sum_util_rec[:, idx], rec_Sij[idx]))
                 
-#                 # this is P(\beta_ir | ij)
-#                 rec_beta = self._phimodel.forward(x, beta)
-#                 rec_beta = torch.softmax(rec_beta, dim=1)
-#                 rec_beta = torch.log(rec_beta + 1e-5)
-
-#                 rec_beta_agg = rec_beta.repeat_interleave(num_grp, dim=0)
-#                 beta_agg = beta.repeat(num_grp, 1)
-
-#                 rec_beta_loss_ir = -self._KLCriterion(rec_beta_agg, beta_agg / torch.sum(beta_agg, dim=1).view(-1, 1))
-#                 rec_beta_loss_uni = self._KLCriterion(rec_beta_agg, uni_kl_targets)
-
-
-#                 rec_beta_loss_ir = torch.sum(rec_beta_loss_ir, dim=1)
-#                 rec_beta_loss_uni = torch.sum(rec_beta_loss_uni, dim=1)
-#                 self._sw.add_scalar("-KL(betair || beta|xij)", torch.mean(rec_beta_loss_ir).item(), global_step+local_step)
-#                 self._sw.add_scalar("KL(betair|| uni)", torch.mean(rec_beta_loss_uni).item(), global_step+local_step)
-#                 rec_beta_loss = rec_beta_loss_ir + torch.pow(ent_decay, epoch+1) * rec_beta_loss_uni
-
-#                 cls_out = self._thmodel.forward(x)
-#                 cls_out = torch.softmax(cls_out, dim=1)
-#                 cls_out = torch.gather(cls_out, 1, y.view(-1, 1)).squeeze()
-#                 cls_out = torch.log(cls_out + 1e-5)
-#                 cls_loss = cls_out.repeat(num_grp)
-
-#                 if inter_iters != -1:
-#                     if (local_step % (2*inter_iters)) % inter_iters == 0:
-#                         do_rec, do_cls = 0, 1
-#                     else:
-#                         do_rec, do_cls = 1, 0
-#                 else:
-#                     do_rec, do_cls = 1, 1
-#                 util = (do_rec * rec_beta_loss) + (do_cls * cls_loss)
-
-#                 util = util.view(num_grp, -1)
-#                 util, max_idxs = torch.max(util, dim=0)
-#                 util = torch.sum(util)
-                
-#                 util_grp += util
-
-#                 cls_loss_sw = torch.gather(cls_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
-#                 rec_loss_sw = torch.gather(rec_beta_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
-#                 self._sw.add_scalar("cls_loss", torch.mean(cls_loss_sw), global_step+local_step)
-#                 self._sw.add_scalar("rec_loss", torch.mean(rec_loss_sw), global_step+local_step)
-
-
-#             loss = -util_grp/len(X_grp)
-#             loss.backward()
-#             self._optimizer.step()
-#             self._sw.add_scalar("Loss", loss.item(), global_step+local_step)
-#             tq.set_description(f"Loss: {loss.item()}")
-#             tq.update(1)
-
-# class MethodRwdHelper(MethodsHelper):
-#     def __init__(self, dh: ourd.DataHelper, nnth: ourth.NNthHelper, nnphi: ourphi.NNPhiHelper, nnpsi: ourpsi.NNPsiHelper, rechlpr: RecourseHelper, *args, **kwargs) -> None:
-#         super().__init__(dh, nnth, nnphi, nnpsi, rechlpr, *args, **kwargs)
-
-    #    # Set all the optimizers
-    #     self._optim = optim.AdamW([
-    #         {'params': self._phimodel.parameters()},
-    #         {'params': self._thmodel.parameters()},
-    #         {'params': self._psimodel.parameters()}
-    #     ], lr=self._lr)
-
-#         self._thoptim = optim.AdamW([
-#             {'params': self._thmodel.parameters()}
-#         ], lr = self._lr)
-
-#         self._phioptim = optim.AdamW([
-#             {'params': self._phimodel.parameters()}
-#         ], lr = self._lr)
-
-#         self._psioptim = optim.AdamW([
-#             {'params': self._psimodel.parameters()}
-#         ], lr = self._lr)
-
-#     def _def_name(self):
-#         return super()._def_name + "method1"
-
-#     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
-        
-#         inter_iters = -1
-#         if "interleave_iters" in kwargs:
-#             inter_iters = kwargs["interleave_iters"]
-
-#         self._phimodel.train()
-#         self._thmodel.train()
-
-#         if loader is None:
-#             loader = self._trngrp_loader
-        
-#         global_step = epoch * len(loader)
-#         tq = tqdm(total=len(loader), desc="Loss")
-
-#         num_grp = self.dh._train.B_per_i
-#         uni_kl_targets = torch.ones(num_grp*num_grp, self._Betadim) / self._Betadim
-#         uni_kl_targets = uni_kl_targets.to(cu.get_device())
-#         ent_decay = torch.tensor([0.9]).to(cu.get_device())
-    
-#         for local_step, (dataid_grp, Zid_grp, X_grp, y_grp, Z_grp, Beta_grp) in enumerate(loader):
-#             util_grp = 0
-#             for dataid, zid, x, y, z, beta in zip(dataid_grp, Zid_grp, X_grp, y_grp, Z_grp, Beta_grp):
-                
-#                 x, y, beta = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), beta.to(cu.get_device())
-#                 self._optim.zero_grad()
-                
-#                 # this is P(\beta_ir | ij)
-#                 rec_beta = self._phimodel.forward(x, beta)
-#                 rec_beta = torch.softmax(rec_beta, dim=1)
-#                 rec_beta = torch.log(rec_beta + 1e-5)
-
-#                 rec_beta_agg = rec_beta.repeat_interleave(num_grp, dim=0)
-#                 beta_agg = beta.repeat(num_grp, 1)
-
-#                 rec_beta_loss_ir = -self._KLCriterion(reduction="none")(rec_beta_agg, beta_agg / torch.sum(beta_agg, dim=1).view(-1, 1))
-#                 rec_beta_loss_uni = self._KLCriterion(reduction="none")(rec_beta_agg, uni_kl_targets)
-
-
-#                 rec_beta_loss_ir = torch.sum(rec_beta_loss_ir, dim=1)
-#                 rec_beta_loss_uni = torch.sum(rec_beta_loss_uni, dim=1)
-#                 self._sw.add_scalar("-KL(betair || beta|xij)", torch.mean(rec_beta_loss_ir).item(), global_step+local_step)
-#                 self._sw.add_scalar("KL(betair|| uni)", torch.mean(rec_beta_loss_uni).item(), global_step+local_step)
-#                 rec_beta_loss = rec_beta_loss_ir + torch.pow(ent_decay, epoch+1) * rec_beta_loss_uni
-
-#                 cls_out = self._thmodel.forward(x)
-#                 cls_out = torch.softmax(cls_out, dim=1)
-#                 cls_out = torch.gather(cls_out, 1, y.view(-1, 1)).squeeze()
-#                 cls_out = torch.log(cls_out + 1e-5)
-#                 cls_loss = cls_out.repeat(num_grp)
-
-#                 if inter_iters != -1:
-#                     if (local_step % (2*inter_iters)) % inter_iters == 0:
-#                         do_rec, do_cls = 0, 1
-#                     else:
-#                         do_rec, do_cls = 1, 0
-#                 else:
-#                     do_rec, do_cls = 1, 1
-#                 util = (do_rec * rec_beta_loss) + (do_cls * cls_loss)
-
-#                 util = util.view(num_grp, -1)
-#                 util, max_idxs = torch.max(util, dim=0)
-#                 util = torch.sum(util)
-                
-#                 util_grp += util
-
-#                 cls_loss_sw = torch.gather(cls_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
-#                 rec_loss_sw = torch.gather(rec_beta_loss.view(num_grp, -1), 0, max_idxs.view(-1, 1))
-#                 self._sw.add_scalar("cls_loss", torch.mean(cls_loss_sw), global_step+local_step)
-#                 self._sw.add_scalar("rec_loss", torch.mean(rec_loss_sw), global_step+local_step)
-
-
-#             loss = -util_grp/len(X_grp)
-#             loss.backward()
-#             self._optimizer.step()
-#             self._sw.add_scalar("Loss", loss.item(), global_step+local_step)
-#             tq.set_description(f"Loss: {loss.item()}")
-#             tq.update(1)
+                util_grp += util_norec + util_rec
+ 
+            loss = -util_grp/len(X_grp)
+            loss.backward()
+            self._optim.step()
+            self._sw.add_scalar("Loss", loss.item(), global_step+local_step)
+            tq.set_description(f"Loss: {loss.item()}")
+            tq.update(1)

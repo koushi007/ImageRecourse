@@ -18,7 +18,7 @@ class Data(ABC):
     For rho, if we regress logits, we have probabilities
     If we decide to regress loss, then we have losses
     """
-    def __init__(self, X, y, Z, Beta, B_per_i, siblings, Z_ids) -> None:
+    def __init__(self, X, y, Z, Beta, B_per_i, siblings, Z_ids, ideal_betas) -> None:
         super().__init__()
         self.X = X
         self.y = y
@@ -29,6 +29,7 @@ class Data(ABC):
         self.Z_ids = Z_ids
         self.num_classes = len(set(y))
         self.classes = set(y)
+        self.ideal_betas = ideal_betas
 
         self.data_ids = np.arange(len(X))
         self.num_Z = len(set(self.Z_ids))
@@ -80,6 +81,13 @@ class Data(ABC):
         if self.siblings is None:
             raise ValueError("Why are u calling siblings on the test/val data?")
         return self.siblings
+    
+    @property
+    def _ideal_betas(self):
+        return self.ideal_betas
+    @_ideal_betas.setter
+    def _ideal_betas(self, value):
+        raise ValueError("Pass it once in constructor. Why are u settig it again?")
     
     def get_instances(self, data_ids:np.array):
         """Returns ij data ids in order:
@@ -161,8 +169,8 @@ class Data(ABC):
         raise NotImplementedError()
 
 class SyntheticData(Data):
-    def __init__(self, X, y, Z, Beta, B_per_i, siblings, Z_ids) -> None:
-        super(SyntheticData, self).__init__(X, y, Z, Beta, B_per_i, siblings, Z_ids)
+    def __init__(self, X, y, Z, Beta, B_per_i, siblings, Z_ids, ideal_betas) -> None:
+        super(SyntheticData, self).__init__(X, y, Z, Beta, B_per_i, siblings, Z_ids, ideal_betas)
     
     def apply_recourse(self, data_ids, betas:np.array):
         """Applies recourse to the specified data is and returns the recoursed x
