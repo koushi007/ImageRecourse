@@ -1,6 +1,6 @@
 import pickle as pkl
 from baseline.data_helper import DataHelper
-from baseline.model_helper import BaselineHelper, BaselineKLHelper, Method1Helper, ModelHelper
+import our_method.methods as ourm
 import our_method.constants as constants
 import our_method.data_helper as ourdh
 import numpy as np
@@ -13,8 +13,8 @@ import our_method.recourse as ourr
 import our_method.test_models as tstm
 
 
-def get_data_helper(dataste_name):
-    if dataste_name == constants.SYNTHETIC:
+def get_data_helper(dataset_name):
+    if dataset_name == constants.SYNTHETIC:
         data_sir = constants.SYN_DIR
         print(f"Loading the dataset: {data_sir}")
         with open(data_sir / "train_3cls.pkl", "rb") as file:
@@ -47,7 +47,7 @@ def get_data_helper(dataste_name):
         return sdh
 
 def fit_theta(nn_theta_type, models_defname, dh:DataHelper, fit, nnth_epochs):
-    if nn_theta_type == "LR":
+    if nn_theta_type == constants.LOGREG:
         lr_kwargs = {
         "lr": 1e-2
     }
@@ -118,7 +118,8 @@ def fit_nnphi(dh:DataHelper, synR:ourr.RecourseHelper, models_defname, fit):
     # load
     else:
         nnpihHelper.load_model_defname(suffix=models_defname)
-        pred_betas, aft_acc, bef_acc = nnpihHelper.recourse_accuracy(dh._test._X, dh._test._y, dh._test._Z, dh._test._Beta)
+    
+    pred_betas, aft_acc, bef_acc = nnpihHelper.recourse_accuracy(dh._test._X, dh._test._y, dh._test._Z, dh._test._Beta)
     
     print(f"Accuracy Before = {bef_acc}; After = {aft_acc}; pred_betas from phi: {np.sum(pred_betas, axis=0)}")
     return nnpihHelper
@@ -140,14 +141,14 @@ def fit_nnpsi(dh:DataHelper, nnarch_args, synR:ourr.RecourseHelper, epochs, mode
     # load
     else:
         nnpsiHelper.load_model_defname(suffix=models_defname)
-        rid, rec_beta = nnpsiHelper.r_acc(dh._test._X, dh._test._y, dh._test._Beta)
-    
+
+    rid, rec_beta = nnpsiHelper.r_acc(dh._test._X, dh._test._y, dh._test._Beta)
     print(f"Num recourse = {len(rid)}; pred_beta from psi: {np.sum(rec_beta, axis=0)}")
     return nnpsiHelper
 
 
 # # %% Assessing three models
-def assess_thphipsi(sdh, nnth, nnphi, nnpsi, pipeline=True):
+def assess_thphipsi(dh, nnth, nnphi, nnpsi, pipeline=True):
     """Assess the three models together
 
     Args:
@@ -158,12 +159,12 @@ def assess_thphipsi(sdh, nnth, nnphi, nnpsi, pipeline=True):
         pipeline (bool, optional): [description]. Defaults to True. This says if we should include recourse only for recourse needed examples.
     """
     if pipeline:
-        raw_acc, rec_acc, rs, pred_betas = tstm.assess_th_phi_psi(dh = sdh, nnth=nnth, nnphi=nnphi, 
+        raw_acc, rec_acc, rs, pred_betas = tstm.assess_th_phi_psi(dh = dh, nnth=nnth, nnphi=nnphi, 
                                                                     nnpsi=nnpsi)
         print(f"Raw acc={raw_acc}, Rec acc={rec_acc}")
         print(f"Asked recourse for {np.sum(rs)} and predicted betas stats are {np.sum(pred_betas > 0.5, axis=0)}")
     else:
-        raw_acc, rec_acc, pred_betas = tstm.assess_th_phi(dh = sdh, nnth=nnth, nnphi=nnphi)
+        raw_acc, rec_acc, pred_betas = tstm.assess_th_phi(dh = dh, nnth=nnth, nnphi=nnphi)
         print(f"Raw acc={raw_acc}, Rec acc={rec_acc}")
         print(f"predicted betas stats are {np.sum(pred_betas > 0.5, axis=0)}")
 
@@ -171,11 +172,11 @@ def assess_thphipsi(sdh, nnth, nnphi, nnpsi, pipeline=True):
 def get_ourm_hlpr(our_method, dh, nnth, nnphi, nnpsi, synR, **kwargs) -> MethodsHelper:
 
     if our_method == constants.SEQUENTIAL:
-        mh = BaselineHelper(dh=dh, nnth=nnth, nnphi=nnphi, nnpsi=nnpsi, rechlpr=synR, kwargs=kwargs)
+        mh = ourm.BaselineHelper(dh=dh, nnth=nnth, nnphi=nnphi, nnpsi=nnpsi, rechlpr=synR, **kwargs)
     elif our_method == constants.SEQUENTIAL_KL:
-        mh = BaselineKLHelper(dh=dh, nnth=nnth, nnphi=nnphi, nnpsi=nnpsi, rechlpr=synR, kwargs=kwargs)
+        mh = ourm.BaselineKLHelper(dh=dh, nnth=nnth, nnphi=nnphi, nnpsi=nnpsi, rechlpr=synR,  **kwargs)
     elif our_method == constants.METHOD1:
-        mh = Method1Helper(dh=dh, nnth=nnth, nnphi=nnphi, nnpsi=nnpsi, rechlpr=synR, kwargs=kwargs)
+        mh = ourm.Method1Helper(dh=dh, nnth=nnth, nnphi=nnphi, nnpsi=nnpsi, rechlpr=synR, **kwargs)
     else:
         raise ValueError("Please pass a valid our method.")
     print(f"After making the weights to default, accuracy = {nnth.accuracy()}")

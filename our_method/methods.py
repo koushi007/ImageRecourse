@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod, abstractproperty
+import our_method.constants as constants
 from os import XATTR_CREATE
 from pathlib import Path
 from socket import SocketIO
@@ -393,7 +394,7 @@ class BaselineHelper(MethodsHelper):
         ], lr = self._lr)
 
     def _def_name(self):
-        return super()._def_name + "baseline"
+        return super()._def_name + constants.SEQUENTIAL
 
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
@@ -491,7 +492,7 @@ class BaselineKLHelper(MethodsHelper):
         ], lr = self._lr)
 
     def _def_name(self):
-        return super()._def_name + "baseline"
+        return super()._def_name + constants.SEQUENTIAL
 
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
@@ -599,7 +600,7 @@ class Method1Helper(MethodsHelper):
         ], lr = self._lr)
 
     def _def_name(self):
-        return super()._def_name + "baselinekl"
+        return super()._def_name + constants.SEQUENTIAL_KL
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         
@@ -690,7 +691,7 @@ class MethodRwdHelper(MethodsHelper):
         ], lr = self._lr)
 
     def _def_name(self):
-        return super()._def_name + "baselinekl"
+        return super()._def_name + constants.SEQUENTIAL_KL
 
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         

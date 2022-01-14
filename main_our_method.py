@@ -12,7 +12,7 @@ cu.set_seed(42)
 if __name__ == "__main__":
 
 # %% Hyperparamrs and config section
-    nn_theta_type = constants.LR
+    nn_theta_type = constants.LOGREG
     models_defname = "-numbadex=10"
     dataset_name = constants.SYNTHETIC # shapenet_sample, shapenet
 
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     num_badex = 10
     grad_steps = 10
 
-    tune_theta_R = True
+    tune_theta_R = False
 
     our_method = constants.METHOD1
     ourm_hlpr_args = {
@@ -39,22 +39,25 @@ if __name__ == "__main__":
     dh = main_helper.get_data_helper(dataset_name = dataset_name)
 
     nnth_mh = main_helper.fit_theta(nn_theta_type=nn_theta_type, models_defname=models_defname,
-                                            dh = dh, fit=True, nnth_epochs=40)
+                                            dh = dh, nnth_epochs=40,
+                                            fit=False)
 
     greedy_r = main_helper.greedy_recourse(nnth_mh=nnth_mh, dh=dh, budget=budget, 
                                             grad_steps=grad_steps, num_badex=num_badex, models_defname=models_defname,
-                                            fit = True)
+                                            fit = False)
 
     if tune_theta_R == True:
         main_helper.fit_R_theta(synR=greedy_r, models_defnam=models_defname)
 
-    nnphi = main_helper.fit_nnphi(dh=dh, synR=greedy_r, models_defname=models_defname, fit=True)
+    nnphi = main_helper.fit_nnphi(dh=dh, synR=greedy_r, models_defname=models_defname, 
+                                    fit=False)
     
     psi_arch_args = {
         "nn_arch": [10, 6]
     }
     nnpsi = main_helper.fit_nnpsi(dh=dh, nnarch_args=psi_arch_args, synR=greedy_r, 
-                                    epochs=20, models_defname=models_defname, fit=True)
+                                    epochs=20, models_defname=models_defname, 
+                                    fit=False)
 
 
 # %% Kick starts our method training
@@ -64,7 +67,7 @@ if __name__ == "__main__":
     ourm_hlpr_args = cu.insert_kwargs(ourm_hlpr_args, {"summarywriter": sw})
 
     ourm_hlpr = main_helper.get_ourm_hlpr(our_method=our_method, dh=dh, nnth=nnth_mh, 
-                                            nnphi=nnphi, nnpsi=nnpsi, synR=greedy_r, kwargs=ourm_hlpr_args)
+                                            nnphi=nnphi, nnpsi=nnpsi, synR=greedy_r, **ourm_hlpr_args)
 
     # fit and test
     for epoch in range(ourm_epochs):
@@ -76,8 +79,7 @@ if __name__ == "__main__":
         print(f"Epoch {epoch} Accuracy {acc}")
         print(f"Epoch {epoch} Grp Accuracy")
         cu.dict_print(ourm_hlpr.grp_accuracy())
-        raw_acc, rec_acc, rs, pred_betas = main_helper.assess_thphipsi(dh = dh, nnth=nnth_mh, nnphi=nnphi, 
-                                                                nnpsi=nnpsi)
+        main_helper.assess_thphipsi(ourm_hlpr._dh, ourm_hlpr._nnth, ourm_hlpr._nnphi, ourm_hlpr._nnpsi)
 
         print("Recourse Accuracy: ")
         main_helper.assess_thphipsi(ourm_hlpr._dh, ourm_hlpr._nnth, ourm_hlpr._nnphi, ourm_hlpr._nnpsi, pipeline=False)
