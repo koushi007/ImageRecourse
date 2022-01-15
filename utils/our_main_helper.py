@@ -1,5 +1,4 @@
 import pickle as pkl
-from baseline.data_helper import DataHelper
 import our_method.methods as ourm
 import our_method.constants as constants
 import our_method.data_helper as ourdh
@@ -11,51 +10,107 @@ import our_method.nn_theta as ournnth
 import utils.common_utils as cu
 import our_method.recourse as ourr
 import our_method.test_models as tstm
-
+import torch
+import our_method.data_helper as ourdh
 
 def get_data_helper(dataset_name):
     if dataset_name == constants.SYNTHETIC:
-        data_sir = constants.SYN_DIR
-        print(f"Loading the dataset: {data_sir}")
-        with open(data_sir / "train_3cls.pkl", "rb") as file:
+        data_dir = constants.SYN_DIR
+        print(f"Loading the dataset: {data_dir}")
+        with open(data_dir / "train_3cls.pkl", "rb") as file:
             train = pkl.load(file)
-        with open(data_sir / "test_3cls.pkl", "rb") as file:
+        with open(data_dir / "test_3cls.pkl", "rb") as file:
             test = pkl.load(file)
-        with open(data_sir / "val_3cls.pkl", "rb") as file:
+        with open(data_dir / "val_3cls.pkl", "rb") as file:
             val = pkl.load(file)
 
-        A = np.array
-        X, Z, Beta, Y, Ins, Sib, _, _, _ = train
-        ideal_betas = np.ones_like(Y) * -1
+        fmt_data_train = lambda ds : (ds[0], ds[1], ds[2], ds[3], ds[4], ds[5], np.ones_like(ds[3])*-1)
+        fmt_data_test = lambda ds : (ds[0], ds[1], ds[2], ds[3], None, None, np.ones_like(ds[3])*-1)
+        train, test, val = fmt_data_train(train), fmt_data_test(test), fmt_data_test(val) 
+
+    elif dataset_name == constants.SHAPENET_SAMPLE:
+        data_dir = constants.SHAPENET_DIR
+        with open(data_dir / "data_sample.pkl", "rb") as file:
+            shapenet_sample = torch.load(file)
+        data_tuple = []
+        for idx in range(7):
+            X = np.array([shapenet_sample[entry][idx] for entry in range(900)])
+            if idx == 3: # This is to make labels 0-indexed
+                X = X-1
+            X = np.squeeze(X)
+            data_tuple.append(X)
+        train, test, val = data_tuple, data_tuple, data_tuple
+        
+
+
+    A = np.array
+    
+    if dataset_name == constants.SYNTHETIC:
+        X, Z, Beta, Y, Ins, Sib, ideal_betas = train
         B_per_i = len(Sib[0])
         train_data = ourdh.SyntheticData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
                                             Siblings=A(Sib), 
                                             Z_ids=A(Ins),
                                             ideal_betas=A(ideal_betas))
 
-        X, Z,  Beta, Y, Ins = test
+        X, Z,  Beta, Y, Ins, _, _ = test
         test_data = ourdh.SyntheticData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
                                         Siblings=None, Z_ids=A(Ins),
                                         ideal_betas=A(ideal_betas))
 
-        X, Z,  Beta, Y, Ins = val
+        X, Z,  Beta, Y, Ins, _, _ = val
         val_data = ourdh.SyntheticData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
                                         Siblings=None, Z_ids=A(Ins),
                                         ideal_betas=A(ideal_betas))
 
-        sdh = ourdh.SyntheticDataHelper(train_data, test_data, val_data)
-        return sdh
+        dh = ourdh.SyntheticDataHelper(train_data, test_data, val_data)
+    
+    elif dataset_name == constants.SHAPENET or dataset_name == constants.SHAPENET_SAMPLE:
+        X, Z, Beta, Y, Ins, Sib, ideal_betas = train
+        B_per_i = len(Sib[0])
+        train_args = {
+            constants.TRANSFORM: constants.RESNET_TRANSFORMS["train"]
+        }
+        train_data = ourdh.ShapenetData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
+                                            Siblings=A(Sib), 
+                                            Z_ids=A(Ins),
+                                            ideal_betas=A(ideal_betas), **train_args)
 
-def fit_theta(nn_theta_type, models_defname, dh:DataHelper, fit, nnth_epochs):
+        test_args = {
+            constants.TRANSFORM: constants.RESNET_TRANSFORMS["test"]
+        }
+        X, Z,  Beta, Y, Ins, _, _ = test
+        test_data = ourdh.ShapenetData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
+                                        Siblings=None, Z_ids=A(Ins),
+                                        ideal_betas=A(ideal_betas), **test_args)
+
+        val_args = {
+            constants.TRANSFORM: constants.RESNET_TRANSFORMS["val"]
+        }
+        X, Z,  Beta, Y, Ins, _, _ = val
+        val_data = ourdh.ShapenetData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
+                                        Siblings=None, Z_ids=A(Ins),
+                                        ideal_betas=A(ideal_betas), **val_args)
+        dh = ourdh.ShapenetDataHelper(train_data, test_data, val_data)
+    else:
+        raise ValueError("Pass supported datasets only")
+    return dh
+
+    
+
+def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epochs):
     if nn_theta_type == constants.LOGREG:
         lr_kwargs = {
-        constants.LRN_RATTE: 1e-2
-    }
+            constants.LRN_RATTE: 1e-2
+        }
         nnth_mh = ournnth.LRNNthHepler(in_dim=dh._train._Xdim, 
                         n_classes=dh._train._num_classes,
                         dh = dh, 
                         **lr_kwargs)
         print("nn_theta is Logistic Regression")
+
+    elif nn_theta_type == constants.RESNET:
+        raise NotImplementedError()
     else:
         raise NotImplementedError()
 
@@ -86,7 +141,7 @@ def fit_R_theta(synR:ourr.RecourseHelper, models_defname):
 
 
 
-def greedy_recourse(nnth_mh:ournnth.NNthHelper, dh:DataHelper, budget, grad_steps, num_badex, models_defname, fit):
+def greedy_recourse(nnth_mh:ournnth.NNthHelper, dh:ourdh.DataHelper, budget, grad_steps, num_badex, models_defname, fit):
     cu.set_seed()
     synR = ourr.SynRecourseHelper(nnth_mh, dh, budget=budget, grad_steps=grad_steps, num_badex=num_badex)
 
@@ -106,7 +161,7 @@ def greedy_recourse(nnth_mh:ournnth.NNthHelper, dh:DataHelper, budget, grad_step
     return synR
 
 
-def fit_nnphi(dh:DataHelper, synR:ourr.RecourseHelper, models_defname, fit):
+def fit_nnphi(dh:ourdh.DataHelper, synR:ourr.RecourseHelper, models_defname, fit):
     nnpihHelper = SynNNPhiMinHelper(in_dim=dh._train._Xdim+dh._train._Betadim, out_dim=dh._train._Betadim,
                             nn_arch=[10, 6], rechlpr=synR, dh=dh)
 
@@ -125,7 +180,7 @@ def fit_nnphi(dh:DataHelper, synR:ourr.RecourseHelper, models_defname, fit):
     return nnpihHelper
 
 
-def fit_nnpsi(dh:DataHelper, nnarch_args, synR:ourr.RecourseHelper, epochs, models_defname, fit):
+def fit_nnpsi(dh:ourdh.DataHelper, nnarch_args, synR:ourr.RecourseHelper, epochs, models_defname, fit):
 
 
     nn_arch = nnarch_args["nn_arch"]

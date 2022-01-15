@@ -4,23 +4,28 @@ import torch.utils.data as data_utils
 import torch.nn as nn
 import numpy as np
 import random
+from our_method.models import ResNET
+import our_method.constants as constants
 
 def init_weights(m:nn.Module):
+
+    assert isinstance(m, ResNET) == False, "Why the hell are u initializing the weights of a pretrained model."
+
     def set_params(w):
         if isinstance(w, nn.Linear):
             torch.nn.init.xavier_uniform(w.weight)
             w.bias.data.fill_(0.01)
     m.apply(set_params)
 
-def init_loader(data_ids, Z_ids, X, y, Z, Beta, shuffle=True, batch_size=None):
+def init_loader(data_ids, Z_ids, X, y, Z, Beta, shuffle=True, batch_size=None, **kwargs):
         T = torch.Tensor
-        dataset = data_utils.TensorDataset(T(data_ids), T(Z_ids), T(X), T(y), T(Z), T(Beta))
+        dataset = CustomTensorDataset(T(data_ids), T(Z_ids), T(X), T(y), T(Z), T(Beta), **kwargs)
         return data_utils.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
-def init_grp_loader(data_ids, Z_ids, X, y, Z, Beta, B_per_i, shuffle=True, batch_size=None):
+def init_grp_loader(data_ids, Z_ids, X, y, Z, Beta, B_per_i, shuffle=True, batch_size=None, **kwargs):
     grp_arr = lambda arr : np.array(np.split(arr, int(len(arr) / B_per_i)))
     return init_loader(grp_arr(data_ids), grp_arr(Z_ids), grp_arr(X), grp_arr(y), grp_arr(Z), grp_arr(Beta), 
-                            shuffle=shuffle, batch_size=int(batch_size / B_per_i))
+                            shuffle=shuffle, batch_size=int(batch_size / B_per_i), **kwargs)
 
 def generic_init_loader(*args, **kwargs):
     """This is a generic init loader. We just create a dataset of any which crap u send to us
@@ -122,3 +127,30 @@ class MultilabelBalancedRandomSampler(Sampler):
 
     def __len__(self):
         return len(self.indices)
+
+
+class CustomTensorDataset(data_utils.Dataset):
+    """TensorDataset with support of transforms.
+    """
+    def __init__(self, data_ids, Z_ids, X, y, Z, Beta, *args, **kwargs):
+        self.data_ids = data_ids
+        self.Z_ids = Z_ids
+        self.X = X
+        self.y = y
+        self.Z = Z
+        self.Beta = Beta
+
+        self.transform = None
+        if constants.TRANSFORM in kwargs:
+            self.transform = kwargs[constants.TRANSFORM]
+
+    def __getitem__(self, index):
+        data_id, z_id, x, y, z, beta = self.data_ids[index], self.Z_ids[index], self.X[index], self.y[index], self.Z[index], self.Beta[index]
+        if self.transform is not None:
+            x, z = self.transform(x), self.transform(z)
+        return data_id, z_id, x, y, z, beta
+
+    def __len__(self):
+        return len(self.data_ids)
+
+

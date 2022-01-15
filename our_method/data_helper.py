@@ -1,6 +1,6 @@
 import abc
 from abc import ABC, abstractmethod, abstractproperty
-
+import our_method.constants as constants
 import numpy as np
 import torch
 import torch.utils.data as data_utils
@@ -14,7 +14,7 @@ class Data(ABC):
     For rho, if we regress logits, we have probabilities
     If we decide to regress loss, then we have losses
     """
-    def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas) -> None:
+    def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs) -> None:
         super().__init__()
         self.X = X
         self.y = y
@@ -32,6 +32,13 @@ class Data(ABC):
 
         self.data_ids = np.arange(len(X))
         self.num_Z = len(set(self.Z_ids))
+
+        self.transform = None
+        self.__init_kwargs(kwargs)
+
+    def __init_kwargs(self, kwargs):
+         if constants.TRANSFORM in kwargs:
+            self.transform = kwargs[constants.TRANSFORM]
 
     @property
     def _data_ids(self) -> np.array:
@@ -135,11 +142,17 @@ class Data(ABC):
         return self._Siblings[data_ids]
 
     def get_loader(self, shuffle, batch_size):
-        return tu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=batch_size)
+        loader_args = {}
+        if self.transform is not None:
+            loader_args[constants.transforms] = self.transform
+        return tu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=batch_size, **loader_args)
 
     def get_grp_loader(self, shuffle, batch_size):
+        loader_args = {}
+        if self.transform is not None:
+            loader_args[constants.transforms] = self.transform
         return tu.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, self._B_per_i,
-                                     shuffle=shuffle, batch_size=batch_size)
+                                     shuffle=shuffle, batch_size=batch_size, **loader_args)
     
     @property
     def _num_data(self):
@@ -166,10 +179,9 @@ class Data(ABC):
     def apply_recourse(self, data_id, betas):
         raise NotImplementedError()
 
-
 class SyntheticData(Data):
-    def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas) -> None:
-        super(SyntheticData, self).__init__(X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas)
+    def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs) -> None:
+        super(SyntheticData, self).__init__(X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs)
     
     def apply_recourse(self, data_ids, betas:np.array):
         """Applies recourse to the specified data is and returns the recoursed x
@@ -182,6 +194,22 @@ class SyntheticData(Data):
         _, _, z, _ = self.get_instances(data_ids)
         assert z.shape() == betas.shape(), "Why the hell are the shapes inconsistent?"
         return np.multiply(z, betas)
+
+class ShapenetData(Data):
+    def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs) -> None:
+        super(ShapenetData, self).__init__(X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs)
+    
+    def apply_recourse(self, data_ids, betas:np.array):
+        """Applies recourse to the specified data is and returns the recoursed x
+        Args:
+            data_ids ([type]): [description]
+            betas ([type]): [description]
+        Returns:
+            [type]: [description]
+        """
+        raise NotImplementedError()
+        
+
 
 
 class DataHelper(ABC):
@@ -216,3 +244,6 @@ class SyntheticDataHelper(DataHelper):
     def __init__(self, train, test, val) -> None:
         super(SyntheticDataHelper, self).__init__(train, test, val)
 
+class ShapenetDataHelper(DataHelper):
+    def __init__(self, train, test, val) -> None:
+        super(ShapenetDataHelper, self).__init__(train, test, val)

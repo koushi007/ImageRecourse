@@ -1,4 +1,6 @@
 from pathlib import Path
+from torchvision import transforms
+
 
 SYNTHETIC = "synthetic"
 SHAPENET_SAMPLE = "shapenet_sample"
@@ -29,3 +31,27 @@ LRN_RATTE = "lr"
 
 SW = "summarywriter"
 BATCH_SIZE = "batch_size"
+
+
+RESNET_TRANSFORMS = {
+    'train': transforms.Compose([
+        transforms.RandomResizedCrop(224),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
+    'val': transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
+    'test': transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ]),
+}
+
+TRANSFORM = "transform"

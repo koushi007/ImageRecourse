@@ -6,15 +6,15 @@ import our_method.constants as constants
 import utils.common_utils as cu
 import utils.our_main_helper as main_helper
 
-cu.set_cuda_device(0)
+cu.set_cuda_device(1)
 cu.set_seed(42)
 
 if __name__ == "__main__":
 
 # %% Hyperparamrs and config section
-    nn_theta_type = constants.LOGREG
+    nn_theta_type = constants.RESNET
     models_defname = "-numbadex=10"
-    dataset_name = constants.SYNTHETIC # shapenet_sample, shapenet
+    dataset_name = constants.SHAPENET_SAMPLE # shapenet_sample, shapenet
 
     budget = 500
     num_badex = 10
