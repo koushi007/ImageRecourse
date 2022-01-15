@@ -136,7 +136,7 @@ class NNthHelper(ABC):
         return self.momentum
 
     @property
-    def _lr_scheduler(self):
+    def _lr_scheduler(self) -> optim.lr_scheduler._LRScheduler:
         return self.lr_scheduler
     @_lr_scheduler.setter
     def _lr_scheduler(self, value):
@@ -227,10 +227,15 @@ class NNthHelper(ABC):
 
     def accuracy(self, X_test = None, y_test=None, *args, **kwargs) -> float:
         self._model.eval()
-        if X_test is None:
-            X_test = self._tst_data._X
-            y_test = self._tst_data._y
-        return super().accuracy(X_test, y_test, *args, **kwargs)
+        if X_test is not None:
+            return accuracy_score(y_test, self.predict_labels(X_test, *args, **kwargs))
+        else:
+            loader = self._tst_loader
+            accs = []
+            for _, _, x, y, _, _ in loader:
+                accs.append(accuracy_score(y.cpu().numpy(), self.predict_labels(x)))
+            return np.mean(accs)
+
 
     def grp_accuracy(self, X_test=None, y_test=None, Beta_test=None, *args, **kwargs) -> dict:
         """Computes the accuracy on a per group basis
@@ -243,6 +248,7 @@ class NNthHelper(ABC):
         Returns:
             dict: [description]
         """
+        raise NotImplementedError("We need to get examples using data loader now as we need to apply transforms")
         if X_test is None:
             X_test, y_test, Beta_test = self._tst_data._X, self._tst_data._y, self._tst_data._Beta
         beta_dim = self._trn_data._Betadim
@@ -297,7 +303,7 @@ class NNthHelper(ABC):
         fname = dir / f"{self._def_name}{suffix}.pt"
         torch.save(self._model.state_dict(), fname)
 
-    def save_model_defname(self, suffix=""):
+    def save_optim_defname(self, suffix=""):
         dir = self._def_dir
         fname = dir / f"{self._def_name}{suffix}-optim.pt"
         torch.save(self._optimizer.state_dict(), fname)
@@ -307,9 +313,10 @@ class NNthHelper(ABC):
         print(f"Loaded NN theta model from {str(fname)}")
         self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
-    def save_model_defname(self, suffix=""):
+    def load_optim_defname(self, suffix=""):
         dir = self._def_dir
         fname = dir / f"{self._def_name}{suffix}-optim.pt"
+        print(f"Loaded NN theta Optimizer from {str(fname)}")
         self._optimizer.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
 class LRNNthHepler(NNthHelper):  
@@ -430,7 +437,13 @@ class ResNETNNthHepler(NNthHelper):
             trn_wts = np.ones(len(loader.dataset))
         assert len(trn_wts) == len(loader.dataset), "Pass all weights. If you intend not to train on an example, then pass the weight as 0"
         trn_wts = torch.Tensor(trn_wts).to(cu.get_device())
-    
+
+        if constants.SCHEDULER in kwargs:
+            if constants.SCHEDULER_TYPE in kwargs:
+                raise NotImplementedError()
+            self._lr_scheduler = tu.get_lr_scheduler(self._optimizer, scheduler_name="cosine_annealing", n_rounds=epochs)
+
+
         def do_post_fit():
             # print(f"Accuracy: {self.accuracy()}")
             return
@@ -456,6 +469,22 @@ class ResNETNNthHepler(NNthHelper):
 
                 tq.set_postfix({"Loss": loss.item()})
                 tq.update(1)
+
+                if self._sw is not None:
+                    self._sw.add_scalar("Loss", loss.item(), global_step)
+            
+            if self._lr_scheduler is not None:
+                self._lr_scheduler.step()
+        
+            epoch_acc = self.accuracy()
+            print(f"Epoch accuracy: {epoch_acc}")
+            if self._sw is not None:
+                self._sw.add_scalar("Epoch_Acc", epoch_acc, epoch)
+            
+
+            if (epoch+1) % 10 == 0:
+                self.save_model_defname(f"resnet-epoch-{epoch}")
+                self.save_op
 
     @property
     def _def_name(self):

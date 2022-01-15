@@ -31,7 +31,7 @@ def get_data_helper(dataset_name):
     elif dataset_name == constants.SHAPENET_SAMPLE:
         data_dir = constants.SHAPENET_DIR
         with open(data_dir / "data_sample.pkl", "rb") as file:
-            shapenet_sample = torch.load(file)
+            shapenet_sample = pkl.load(file)
         data_tuple = []
         for idx in range(7):
             X = np.array([shapenet_sample[entry][idx] for entry in range(900)])
@@ -40,8 +40,18 @@ def get_data_helper(dataset_name):
             X = np.squeeze(X)
             data_tuple.append(X)
         train, test, val = data_tuple, data_tuple, data_tuple
-        
-
+    elif dataset_name == constants.SHAPENET:
+        data_dir = constants.SHAPENET_DIR_SAI
+        def process_data(fname):
+            with open(data_dir / fname, "rb") as file:
+                shapenet_full = pkl.load(file)
+            data_tuple = []
+            for idx in range(7):
+                X = np.array([shapenet_full[entry][idx] for entry in range(len(shapenet_full))])
+                X = np.squeeze(X)
+                data_tuple.append(X)
+            return data_tuple
+        train, test, val = process_data("training_shapenet_data.pkl"), process_data("validation_shapenet_data.pkl"), process_data("validation_shapenet_data.pkl")
 
     A = np.array
     
@@ -98,7 +108,7 @@ def get_data_helper(dataset_name):
 
     
 
-def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epochs):
+def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epochs, *args, **kwargs):
     if nn_theta_type == constants.LOGREG:
         lr_kwargs = {
             constants.LRN_RATTE: 1e-2
@@ -110,7 +120,14 @@ def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epoc
         print("nn_theta is Logistic Regression")
 
     elif nn_theta_type == constants.RESNET:
-        raise NotImplementedError()
+        resnet_kwargs = {
+            constants.LRN_RATTE: 1e-3,
+            constants.MOMENTUM: 0.9
+        }
+        resnet_kwargs = cu.insert_kwargs(resnet_kwargs, kwargs)
+        nnth_mh = ournnth.ResNETNNthHepler(n_classes=dh._train._num_classes, dh=dh,
+                                            **resnet_kwargs)
+        print("nn_theta is Resnet Model")
     else:
         raise NotImplementedError()
 

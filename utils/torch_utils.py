@@ -6,6 +6,7 @@ import numpy as np
 import random
 from our_method.models import ResNET
 import our_method.constants as constants
+import torch.optim as optim
 
 def init_weights(m:nn.Module):
 
@@ -152,5 +153,38 @@ class CustomTensorDataset(data_utils.Dataset):
 
     def __len__(self):
         return len(self.data_ids)
+
+
+def get_lr_scheduler(optimizer, scheduler_name, n_rounds=None):
+    """
+    Gets torch.optim.lr_scheduler given an lr_scheduler name and an optimizer
+    :param optimizer:
+    :type optimizer: torch.optim.Optimizer
+    :param scheduler_name: possible are
+    :type scheduler_name: str
+    :param n_rounds: number of training rounds, only used if `scheduler_name == multi_step`
+    :type n_rounds: int
+    :return: torch.optim.lr_scheduler
+    """
+
+    if scheduler_name == "sqrt":
+        return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: 1 / np.sqrt(x) if x > 0 else 1)
+
+    elif scheduler_name == "linear":
+        return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: 1 / x if x > 0 else 1)
+
+    elif scheduler_name == "constant":
+        return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: 1)
+
+    elif scheduler_name == "cosine_annealing":
+        return optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=0)
+
+    elif scheduler_name == "multi_step":
+        assert n_rounds is not None, "Number of rounds is needed for \"multi_step\" scheduler!"
+        milestones = [n_rounds//2, 3*(n_rounds//4)]
+        return optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+
+    else:
+        raise NotImplementedError("Other learning rate schedulers are not implemented")
 
 

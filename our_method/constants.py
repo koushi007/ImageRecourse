@@ -8,6 +8,7 @@ SHAPENET = "shapenet"
 
 SYN_DIR = Path("our_method/data/syn")
 SHAPENET_DIR = Path("our_method/data/shapenet")
+SHAPENET_DIR_SAI = Path("/mnt/infonas/data/saikoushik")
 TB_DIR = Path("tblogs/")
 
 LOGREG = "LR"
@@ -58,3 +59,4 @@ RESNET_TRANSFORMS = {
 TRANSFORM = "transform"
 
 SCHEDULER = "scheduler"
+SCHEDULER_TYPE = "scheduler_type"
