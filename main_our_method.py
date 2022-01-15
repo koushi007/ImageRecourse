@@ -47,7 +47,7 @@ if __name__ == "__main__":
                                             fit = False)
 
     if tune_theta_R == True:
-        main_helper.fit_R_theta(synR=greedy_r, models_defnam=models_defname)
+        main_helper.fit_R_theta(synR=greedy_r, models_defname=models_defname)
 
     nnphi = main_helper.fit_nnphi(dh=dh, synR=greedy_r, models_defname=models_defname, 
                                     fit=False)
@@ -64,7 +64,7 @@ if __name__ == "__main__":
 
     print(f"Initial Accuracy is: {nnth_mh.accuracy()}")
     sw = SummaryWriter(log_dir=f"{tbdir}/{our_method}")
-    ourm_hlpr_args = cu.insert_kwargs(ourm_hlpr_args, {"summarywriter": sw})
+    ourm_hlpr_args = cu.insert_kwargs(ourm_hlpr_args, {constants.SW: sw})
 
     ourm_hlpr = main_helper.get_ourm_hlpr(our_method=our_method, dh=dh, nnth=nnth_mh, 
                                             nnphi=nnphi, nnpsi=nnpsi, synR=greedy_r, **ourm_hlpr_args)

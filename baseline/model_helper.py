@@ -48,10 +48,10 @@ class ModelHelper(ABC):
 # %% inits
     
     def __init_kwargs(self, kwargs):
-        if "batch_size" in kwargs:
-            self.batch_size = kwargs["batch_size"]   
-        if "summarywriter" in kwargs:
-            self.sw = kwargs["summarywriter"]
+        if constants.BATCH_SIZE in kwargs:
+            self.batch_size = kwargs[constants.BATCH_SIZE]   
+        if constants.SW in kwargs:
+            self.sw = kwargs[constants.SW]
 
     def __init_loaders(self):
         self.trn_loader = self._trn_data.get_loader(shuffle=True, batch_size=self.batch_size)

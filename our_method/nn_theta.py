@@ -11,7 +11,6 @@ import torch.utils.data as data_utils
 import utils.common_utils as cu
 import utils.torch_utils as tu
 from sklearn.metrics import accuracy_score
-from torch._C import dtype
 from torch.optim import SGD, AdamW
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -19,6 +18,7 @@ from tqdm import tqdm
 import our_method.data_helper as ourdh
 from our_method.data_helper import Data
 from our_method.models import LRModel
+import our_method.constants as constants
 
 
 class NNthHelper(ABC):
@@ -36,12 +36,12 @@ class NNthHelper(ABC):
         self.__init_loaders()
     
     def __init_kwargs(self, kwargs:dict):
-        if "lr" in kwargs.keys():
-            self.lr = kwargs["lr"]
-        if "summarywriter" in kwargs:
-            self.sw = kwargs["summarywriter"]
-        if "batch_size" in kwargs:
-            self.batch_size = kwargs["batch_size"]
+        if constants.LRN_RATTE in kwargs.keys():
+            self.lr = kwargs[constants.LRN_RATTE]
+        if constants.SW in kwargs:
+            self.sw = kwargs[constants.SW]
+        if constants.BATCH_SIZE in kwargs:
+            self.batch_size = kwargs[constants.BATCH_SIZE]
 
     def __init_loaders(self):
         self.trn_loader = self._dh._train.get_loader(shuffle=True, batch_size=self._batch_size)
@@ -252,7 +252,7 @@ class NNthHelper(ABC):
         beta_dim = self._trn_data._Betadim
         res_dict = {}
         for beta_id in range(beta_dim):
-            beta_samples = np.where(Beta_test[:, beta_id] == 1)
+            beta_samples = np.where(Beta_test[:, beta_id] == 1)[0]
             res_dict[beta_id] = self.accuracy(X_test[beta_samples], y_test[beta_samples])
         return res_dict
 
@@ -268,9 +268,11 @@ class NNthHelper(ABC):
             np.array of losses
         """
         T = torch.Tensor
-        X_test, y_test = T(X_test), T(y_test).to(cu.get_device(), dtype=torch.int64)
         probs = self.predict_proba(X_test)
-        return self._xecri_perex(T(probs).to(cu.get_device()), y_test).cpu().numpy()
+
+        return self._xecri_perex(
+            T(probs).to(cu.get_device()), T(y_test).to(cu.get_device())
+        ).cpu().numpy()
 
     def get_loss(self, X_test, y_test):
         """Returns the Loss of the batch
@@ -286,9 +288,12 @@ class NNthHelper(ABC):
             [type]: [description]
         """
         T = torch.Tensor
-        X_test, y_test = T(X_test), T(y_test).to(cu.get_device(), dtype=torch.int64)
         probs = self.predict_proba(X_test)
-        return self._xecri(T(probs).to(cu.get_device()), y_test).cpu().numpy()
+
+        y_test = T(y_test).to(cu.get_device(), dtype=torch.int64)
+        return self._xecri(
+            T(probs).to(cu.get_device()), T(y_test).to(cu.get_device())
+        ).cpu().numpy()
 
     def save_model_defname(self, suffix=""):
         dir = self._def_dir
@@ -298,7 +303,7 @@ class NNthHelper(ABC):
     
     def load_model_defname(self, suffix=""):
         fname = self._def_dir / f"{self._def_name}{suffix}.pt"
-        print(f"Loaded model from {str(fname)}")
+        print(f"Loaded NN theta model from {str(fname)}")
         self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
 class LRNNthHepler(NNthHelper):  
@@ -310,7 +315,6 @@ class LRNNthHepler(NNthHelper):
 
         tu.init_weights(self._model)
         self._model.to(cu.get_device())
-        
 
         self._optimizer = AdamW([
             {'params': self._model.parameters()},

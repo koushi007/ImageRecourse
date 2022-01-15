@@ -14,7 +14,6 @@ from torch.utils.data import sampler
 import utils.common_utils as cu
 import utils.torch_utils as tu
 from sklearn.metrics import accuracy_score
-from torch._C import dtype
 from torch.optim import SGD, AdamW
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -24,6 +23,7 @@ from our_method.data_helper import Data
 from our_method.models import FNN, LRModel
 from our_method.nn_theta import NNthHelper
 from our_method.recourse import RecourseHelper
+import our_method.constants as constants
 
 
 class NNPsiHelper(ABC):
@@ -41,12 +41,12 @@ class NNPsiHelper(ABC):
         self.__init_loaders()
     
     def __init_kwargs(self, kwargs:dict):
-        if "lr" in kwargs.keys():
-            self.lr = kwargs["lr"]
-        if "summarywriter" in kwargs:
-            self.sw = kwargs["summarywriter"]
-        if "batch_size" in kwargs:
-            self.batch_size = kwargs["batch_size"]
+        if constants.LRN_RATTE in kwargs.keys():
+            self.lr = kwargs[constants.LRN_RATTE]
+        if constants.SW in kwargs:
+            self.sw = kwargs[constants.SW]
+        if constants.BATCH_SIZE in kwargs:
+            self.batch_size = kwargs[constants.BATCH_SIZE]
 
     def __init_loaders(self):
         # This is very simple. We just need x, y, R in each batch. Thats all
@@ -153,10 +153,6 @@ class NNPsiHelper(ABC):
     @abstractproperty
     def _def_name(self):
         raise NotImplementedError()
-
-    @property
-    def _lr(self):
-        return self.lr
 
     @property
     def _xecri(self):
@@ -278,7 +274,7 @@ class SynNNPsiHelper(NNPsiHelper):
             for epoch_step, (X, Beta, R) in enumerate(loader):
                 global_step += 1
 
-                X, Beta, R = X.to(cu.get_device()), Beta.to(cu.get_device()), R.to(cu.get_device())
+                X, Beta, R = X.to(cu.get_device()), Beta.to(cu.get_device(), dtype=torch.int64), R.to(cu.get_device(), dtype=torch.int64)
 
                 self._optimizer.zero_grad()
                 rpreds = self._psimodel.forward_r(X, Beta)

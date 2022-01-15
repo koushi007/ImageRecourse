@@ -29,18 +29,18 @@ def get_data_helper(dataset_name):
         ideal_betas = np.ones_like(Y) * -1
         B_per_i = len(Sib[0])
         train_data = ourdh.SyntheticData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
-                                            siblings=A(Sib), 
+                                            Siblings=A(Sib), 
                                             Z_ids=A(Ins),
                                             ideal_betas=A(ideal_betas))
 
         X, Z,  Beta, Y, Ins = test
         test_data = ourdh.SyntheticData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
-                                        siblings=None, Z_ids=A(Ins),
+                                        Siblings=None, Z_ids=A(Ins),
                                         ideal_betas=A(ideal_betas))
 
         X, Z,  Beta, Y, Ins = val
         val_data = ourdh.SyntheticData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
-                                        siblings=None, Z_ids=A(Ins),
+                                        Siblings=None, Z_ids=A(Ins),
                                         ideal_betas=A(ideal_betas))
 
         sdh = ourdh.SyntheticDataHelper(train_data, test_data, val_data)
@@ -49,7 +49,7 @@ def get_data_helper(dataset_name):
 def fit_theta(nn_theta_type, models_defname, dh:DataHelper, fit, nnth_epochs):
     if nn_theta_type == constants.LOGREG:
         lr_kwargs = {
-        "lr": 1e-2
+        constants.LRN_RATTE: 1e-2
     }
         nnth_mh = ournnth.LRNNthHepler(in_dim=dh._train._Xdim, 
                         n_classes=dh._train._num_classes,
@@ -76,13 +76,13 @@ def fit_theta(nn_theta_type, models_defname, dh:DataHelper, fit, nnth_epochs):
     return nnth_mh
 
 
-def fit_R_theta(synR:ourr.RecourseHelper, models_defnam):
+def fit_R_theta(synR:ourr.RecourseHelper, models_defname):
     # rfit
     synR.nnth_rfit(epochs=1)
     print(f"Accuracy after finetuning nntheta on Recourse set with weighted ERM is {synR._nnth.accuracy()}")
     print(f"Grp Accuracy of the rfit finetuned model is ")
     cu.dict_print(synR._nnth.grp_accuracy())
-    synR._nnth.save_model_defname(suffix=models_defnam)
+    synR._nnth.save_model_defname(suffix=models_defname)
 
 
 

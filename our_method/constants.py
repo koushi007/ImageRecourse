@@ -24,3 +24,8 @@ PHI = "phi"
 PSI = "psi"
 
 PRETRN_THPSIPSI = "pretrn_th_phi_psi"
+
+LRN_RATTE = "lr"
+
+SW = "summarywriter"
+BATCH_SIZE = "batch_size"

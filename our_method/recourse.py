@@ -22,6 +22,7 @@ from torch.utils import data
 
 from our_method.data_helper import DataHelper
 from our_method.nn_theta import NNthHelper
+import our_method.constants as constants
 
 
 class RecourseHelper(ABC):
@@ -47,10 +48,10 @@ class RecourseHelper(ABC):
         self.set_Sij()
 
     def __init_kwargs(self, kwargs):
-        if "batch_size" in kwargs:
-            self.batch_size = kwargs["batch_size"]
-        if "lr" in kwargs:
-            self.lr = kwargs["lr"]
+        if constants.BATCH_SIZE in kwargs:
+            self.batch_size = kwargs[constants.BATCH_SIZE]
+        if constants.LRN_RATTE in kwargs:
+            self.lr = kwargs[constants.LRN_RATTE]
 
     def init_trn_wts(self):
         for rid in self.R:
@@ -207,7 +208,7 @@ class RecourseHelper(ABC):
         self.Sij = []
         losses = self._nnth.get_loss_perex(self._dh._train._X, self._dh._train._y)
         for data_id in range(self._dh._train._num_data):
-            sib_ids = self._dh._train._siblings[data_id]
+            sib_ids = self._dh._train._Siblings[data_id]
             self.Sij.append(np.array(
                 (losses[sib_ids] < losses[data_id]) * 1
             ))
@@ -234,7 +235,7 @@ class RecourseHelper(ABC):
 
     def simulate_addr(self, trn_wts, R, rid):
         new_wts = deepcopy(trn_wts)
-        sib_ids = self._dh._train._siblings[rid]
+        sib_ids = self._dh._train._Siblings[rid]
         if sum(self.Sij[rid]) == 0.:
             # If there are no sij, recourse is hopeless
             warnings.warn("Why will Sij be empty when we attempt to add a bad example in R?")
@@ -251,7 +252,7 @@ class RecourseHelper(ABC):
 
     def simulate_rmvr(self, trn_wts, R, rid):
         new_wts = deepcopy(trn_wts)
-        sib_ids = self._dh._train._siblings[rid]
+        sib_ids = self._dh._train._Siblings[rid]
         if sum(self.Sij[rid]) == 0.:
             # If there are no sij, recourse is hopeless
             warnings.warn("Why will Sij be empty when we attempt to add a bad example in R?")

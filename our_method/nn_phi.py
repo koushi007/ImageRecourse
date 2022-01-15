@@ -2,10 +2,8 @@ import warnings
 from abc import ABC, abstractmethod, abstractproperty
 from copy import deepcopy
 from pathlib import Path
-from random import shuffle
 
 import numpy as np
-import sklearn
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -22,6 +20,7 @@ from our_method.data_helper import Data
 from our_method.models import FNN, LRModel
 from our_method.nn_theta import NNthHelper
 from our_method.recourse import RecourseHelper
+import our_method.constants as constants
 
 
 class NNPhiHelper(ABC):
@@ -39,17 +38,16 @@ class NNPhiHelper(ABC):
         self.__init_loaders()
     
     def __init_kwargs(self, kwargs:dict):
-        if "lr" in kwargs.keys():
-            self.lr = kwargs["lr"]
-        if "summarywriter" in kwargs:
-            self.sw = kwargs["summarywriter"]
-        if "batch_size" in kwargs:
-            self.batch_size = kwargs["batch_size"]
+        if constants.LRN_RATTE in kwargs.keys():
+            self.lr = kwargs[constants.LRN_RATTE]
+        if constants.SW in kwargs:
+            self.sw = kwargs[constants.SW]
+        if constants.BATCH_SIZE in kwargs:
+            self.batch_size = kwargs[constants.BATCH_SIZE]
 
     def __init_loaders(self):
         # Initializing train loader is fairly complicated
         # tst_loader and val_loader behave as always
-        
 
         # For training, we need X, Beta, Sib_beta, Sij, losses of siblings (to implement many strategies)
         # To avoid complications, we only pass Beta ans tgt beta shall be computed runtime based on Sij
@@ -57,7 +55,7 @@ class NNPhiHelper(ABC):
         trn_y = self._trn_data._y
         trn_Beta = self._trn_data._Beta
         trn_Sij = np.array(self._rechlpr._Sij)
-        trn_sibs = self._trn_data._siblings
+        trn_sibs = self._trn_data._Siblings
         trn_losses = self._rechlpr._nnth.get_loss_perex(trn_X, trn_y)
         sib_losses = np.array([trn_losses[sib_ids] for sib_ids in trn_sibs])
         # now get the target beta. We only compute the sibnling betas here. Create the target as please later
@@ -160,11 +158,7 @@ class NNPhiHelper(ABC):
 
     @abstractproperty
     def _def_name(self):
-        raise NotImplementedError()
-
-    @property
-    def _lr(self):
-        return self.lr
+        raise NotImplementedError() 
 
     @property
     def _xecri(self):
@@ -201,7 +195,7 @@ class NNPhiHelper(ABC):
 
 
 # %% Some utilities
-    def recourse_accuracy(self, X_test, y_test, Z_test, Beta_test, *args, **kwargs) -> float:
+    def recourse_accuracy(self, X_test, y_test, Z_test, Beta_test, recourse_theta=0.5, *args, **kwargs) -> float:
         """Returns the Accuracy of predictions
 
         Args:
@@ -212,7 +206,7 @@ class NNPhiHelper(ABC):
             before accuracy, predicted betas, after accuracy
         """
         pred_beta = self.predict_beta(X_test, Beta_test)
-        pred_beta = (pred_beta > 0.5) * 1
+        pred_beta = (pred_beta > recourse_theta) * 1
         X_test_rec = np.multiply(Z_test, pred_beta)
         return pred_beta, self._rechlpr._nnth.accuracy(X_test_rec, y_test), self._rechlpr._nnth.accuracy(X_test, y_test)
 

@@ -59,20 +59,20 @@ class MethodsHelper(ABC):
 
 # %% inits
     def __init_kwargs(self, kwargs:dict):
-        if "lr" in kwargs.keys():
-            self.lr = kwargs["lr"]
-        if "summarywriter" in kwargs.keys():
-            self.sw = kwargs["summarywriter"]
-        if "batch_size" in kwargs.keys():
-            self.batch_size = kwargs["batch_size"]
-        if "pretrn_th_phi_psi" in kwargs.keys():
-            assert isinstance(kwargs["pretrn_th_phi_psi"], dict), "Please pass a dictionary to me"
-            self.pretrn_models = kwargs["pretrn_th_phi_psi"]
-            if not self.pretrn_models["th"]:
+        if constants.LRN_RATTE in kwargs.keys():
+            self.lr = kwargs[constants.LRN_RATTE]
+        if constants.SW in kwargs.keys():
+            self.sw = kwargs[constants.SW]
+        if constants.BATCH_SIZE in kwargs.keys():
+            self.batch_size = kwargs[constants.BATCH_SIZE]
+        if constants.PRETRN_THPSIPSI in kwargs.keys():
+            assert isinstance(kwargs[constants.PRETRN_THPSIPSI], dict), "Please pass a dictionary to me"
+            self.pretrn_models = kwargs[constants.PRETRN_THPSIPSI]
+            if not self.pretrn_models[constants.THETA]:
                 tu.init_weights(self._thmodel)
-            if not self.pretrn_models["phi"]:
+            if not self.pretrn_models[constants.PHI]:
                 tu.init_weights(self._phimodel)
-            if not self.pretrn_models["psi"]:
+            if not self.pretrn_models[constants.PSI]:
                 tu.init_weights(self._psimodel)
 
     def __init_loader(self):

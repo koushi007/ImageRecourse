@@ -10,7 +10,8 @@ import numpy as np
 
 def assess_th_phi_psi(dh:ourd.DataHelper, nnth:ourth.NNthHelper, nnphi:ourphi.NNPhiHelper, 
                         nnpsi:ourpsi.NNPsiHelper,
-                        loader:data_utils.DataLoader=None, *args, **kwargs):
+                        loader:data_utils.DataLoader=None, 
+                        rec_threshold=0.5, *args, **kwargs):
     """
     Returns:
         raw_acc
@@ -37,7 +38,7 @@ def assess_th_phi_psi(dh:ourd.DataHelper, nnth:ourth.NNthHelper, nnphi:ourphi.NN
 
             # need recourse
             r = nnpsi._psimodel.forward_r(x, b)
-            need_rec = (r > 0.5) * 1
+            need_rec = (r > rec_threshold) * 1
 
             # predict beta
             pred_b = nnphi._phimodel.forward(x, b)

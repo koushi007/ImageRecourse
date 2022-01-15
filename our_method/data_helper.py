@@ -1,15 +1,11 @@
 import abc
 from abc import ABC, abstractmethod, abstractproperty
-from threading import local
-from typing import List
 
-import baseline.data.syn_dataset as synds
 import numpy as np
 import torch
 import torch.utils.data as data_utils
 import utils.common_utils as cu
 import utils.torch_utils as tu
-from torch._C import Value
 
 
 class Data(ABC):
@@ -18,14 +14,17 @@ class Data(ABC):
     For rho, if we regress logits, we have probabilities
     If we decide to regress loss, then we have losses
     """
-    def __init__(self, X, y, Z, Beta, B_per_i, siblings, Z_ids, ideal_betas) -> None:
+    def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas) -> None:
         super().__init__()
         self.X = X
         self.y = y
         self.Z = Z
+
+        assert len(Z) == len(y), "If the length of Z and y is not the same, we may have to repeat_interleave somewhere to make the rest of code easy to access."
+
         self.Beta = Beta
         self.B_per_i = B_per_i
-        self.siblings = siblings
+        self.Siblings = Siblings
         self.Z_ids = Z_ids
         self.num_classes = len(set(y))
         self.classes = set(y)
@@ -77,10 +76,10 @@ class Data(ABC):
         return self.B_per_i
 
     @property
-    def _siblings(self):
-        if self.siblings is None:
+    def _Siblings(self):
+        if self.Siblings is None:
             raise ValueError("Why are u calling siblings on the test/val data?")
-        return self.siblings
+        return self.Siblings
     
     @property
     def _ideal_betas(self):
@@ -88,6 +87,8 @@ class Data(ABC):
     @_ideal_betas.setter
     def _ideal_betas(self, value):
         raise ValueError("Pass it once in constructor. Why are u settig it again?")
+
+# %% some useful functions
     
     def get_instances(self, data_ids:np.array):
         """Returns ij data ids in order:
@@ -131,10 +132,15 @@ class Data(ABC):
         if type(data_ids) == type([]):
             data_ids = np.aray(data_ids)
         assert type(data_ids) == type(np.array([1])), "We expect even a scalar index to be passed as an array"
-        return self._siblings[data_ids]
-    
+        return self._Siblings[data_ids]
 
-    # some useful functions
+    def get_loader(self, shuffle, batch_size):
+        return tu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=batch_size)
+
+    def get_grp_loader(self, shuffle, batch_size):
+        return tu.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, self._B_per_i,
+                                     shuffle=shuffle, batch_size=batch_size)
+    
     @property
     def _num_data(self):
         return len(self.data_ids)
@@ -160,17 +166,10 @@ class Data(ABC):
     def apply_recourse(self, data_id, betas):
         raise NotImplementedError()
 
-    @abc.abstractmethod
-    def get_loader(self, shuffle, batch_size):
-        raise NotImplementedError()
-
-    @abc.abstractmethod
-    def get_grp_loader(self, shuffle, batch_size):
-        raise NotImplementedError()
 
 class SyntheticData(Data):
-    def __init__(self, X, y, Z, Beta, B_per_i, siblings, Z_ids, ideal_betas) -> None:
-        super(SyntheticData, self).__init__(X, y, Z, Beta, B_per_i, siblings, Z_ids, ideal_betas)
+    def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas) -> None:
+        super(SyntheticData, self).__init__(X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas)
     
     def apply_recourse(self, data_ids, betas:np.array):
         """Applies recourse to the specified data is and returns the recoursed x
@@ -183,13 +182,7 @@ class SyntheticData(Data):
         _, _, z, _ = self.get_instances(data_ids)
         assert z.shape() == betas.shape(), "Why the hell are the shapes inconsistent?"
         return np.multiply(z, betas)
-    
-    def get_loader(self, shuffle, batch_size):
-        return tu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=batch_size)
 
-    def get_grp_loader(self, shuffle, batch_size):
-        return tu.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, self._B_per_i,
-                                     shuffle=shuffle, batch_size=batch_size)
 
 class DataHelper(ABC):
     def __init__(self, train, test, val) -> None:
