@@ -144,13 +144,13 @@ class Data(ABC):
     def get_loader(self, shuffle, batch_size):
         loader_args = {}
         if self.transform is not None:
-            loader_args[constants.transforms] = self.transform
+            loader_args[constants.TRANSFORM] = self.transform
         return tu.init_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=batch_size, **loader_args)
 
     def get_grp_loader(self, shuffle, batch_size):
         loader_args = {}
         if self.transform is not None:
-            loader_args[constants.transforms] = self.transform
+            loader_args[constants.TRANSFORM] = self.transform
         return tu.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, self._B_per_i,
                                      shuffle=shuffle, batch_size=batch_size, **loader_args)
     

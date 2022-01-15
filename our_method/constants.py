@@ -28,6 +28,7 @@ PSI = "psi"
 PRETRN_THPSIPSI = "pretrn_th_phi_psi"
 
 LRN_RATTE = "lr"
+MOMENTUM = "momentum"
 
 SW = "summarywriter"
 BATCH_SIZE = "batch_size"
@@ -37,21 +38,23 @@ RESNET_TRANSFORMS = {
     'train': transforms.Compose([
         transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
+        # transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
     'val': transforms.Compose([
         transforms.Resize(256),
         transforms.CenterCrop(224),
-        transforms.ToTensor(),
+        # transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
     'test': transforms.Compose([
         transforms.Resize(256),
         transforms.CenterCrop(224),
-        transforms.ToTensor(),
+        # transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
 }
 
 TRANSFORM = "transform"
+
+SCHEDULER = "scheduler"

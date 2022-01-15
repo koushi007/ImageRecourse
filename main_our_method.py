@@ -6,14 +6,14 @@ import our_method.constants as constants
 import utils.common_utils as cu
 import utils.our_main_helper as main_helper
 
-cu.set_cuda_device(1)
+cu.set_cuda_device(0)
 cu.set_seed(42)
 
 if __name__ == "__main__":
 
 # %% Hyperparamrs and config section
     nn_theta_type = constants.RESNET
-    models_defname = "-numbadex=10"
+    models_defname = "-resnet"
     dataset_name = constants.SHAPENET_SAMPLE # shapenet_sample, shapenet
 
     budget = 500
@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
     nnth_mh = main_helper.fit_theta(nn_theta_type=nn_theta_type, models_defname=models_defname,
                                             dh = dh, nnth_epochs=40,
-                                            fit=False)
+                                            fit=True)
 
     greedy_r = main_helper.greedy_recourse(nnth_mh=nnth_mh, dh=dh, budget=budget, 
                                             grad_steps=grad_steps, num_badex=num_badex, models_defname=models_defname,

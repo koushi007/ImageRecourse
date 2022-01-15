@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 import our_method.data_helper as ourdh
 from our_method.data_helper import Data
-from our_method.models import LRModel
+from our_method.models import LRModel, ResNET
 import our_method.constants as constants
 
 
@@ -31,6 +31,8 @@ class NNthHelper(ABC):
         self.lr = 1e-3
         self.sw = None
         self.batch_size = 16
+        self.momentum = 0
+        self.lr_scheduler = None
 
         self.__init_kwargs(kwargs)
         self.__init_loaders()
@@ -42,6 +44,8 @@ class NNthHelper(ABC):
             self.sw = kwargs[constants.SW]
         if constants.BATCH_SIZE in kwargs:
             self.batch_size = kwargs[constants.BATCH_SIZE]
+        if constants.MOMENTUM in kwargs:
+            self.momentum = kwargs[constants.MOMENTUM]
 
     def __init_loaders(self):
         self.trn_loader = self._dh._train.get_loader(shuffle=True, batch_size=self._batch_size)
@@ -50,7 +54,7 @@ class NNthHelper(ABC):
 
 # %% properties
     @property
-    def _model(self):
+    def _model(self) -> nn.Module:
         return self.model
     @_model.setter
     def _model(self, value):
@@ -101,7 +105,7 @@ class NNthHelper(ABC):
         raise ValueError("Why are u setting the data object once again?")
 
     @property
-    def _optimizer(self):
+    def _optimizer(self) -> optim.Optimizer:
         if  self.optimizer == None:
             raise ValueError("optimizer not yet set")
         return self.optimizer
@@ -128,8 +132,15 @@ class NNthHelper(ABC):
         return Path("our_method/results/syn/models")
 
     @property
-    def _lr(self):
-        return self.lr
+    def _momentum(self):
+        return self.momentum
+
+    @property
+    def _lr_scheduler(self):
+        return self.lr_scheduler
+    @_lr_scheduler.setter
+    def _lr_scheduler(self, value):
+        self._lr_scheduler = value
 
     @property
     def _xecri(self):
@@ -177,32 +188,6 @@ class NNthHelper(ABC):
         """
         raise NotImplementedError()
 
-    @abstractmethod
-    def predict_labels(self, X):
-        """Predict the labels
-
-        Args:
-            X ([type]): [description]
-
-        Raises:
-            NotImplementedError: [description]
-
-        Returns:
-            [type]: [description]
-        """
-        raise NotImplementedError()
-
-    @abstractmethod
-    def predict_proba(self, X):   
-        """Predict the probabilities
-
-        Raises:
-            NotImplementedError: [description]
-
-        Returns:
-            [type]: [description]
-        """    
-        raise NotImplementedError
 
 # %% some utilities
 
@@ -224,17 +209,28 @@ class NNthHelper(ABC):
         assert self.__model_copy is not None, "Why are you clearing an already cleared copy?"
         self.__model_copy = None
 
-    def accuracy(self, X_test, y_test, *args, **kwargs) -> float:
-        """Returns the Accuracy of predictions
+    def predict_labels(self, X):
+        self._model.eval()
+        with torch.no_grad():
+            if not isinstance(X, torch.Tensor):
+                X = torch.Tensor(X).to(cu.get_device())
+            X = X.to(cu.get_device())
+            return self._model.forward_labels(X).cpu().numpy()
+    
+    def predict_proba(self, X):
+        self._model.eval()
+        with torch.no_grad():
+            if not isinstance(X, torch.Tensor):
+                X = torch.Tensor(X)
+            X = X.to(cu.get_device())
+            return self._model.forward_proba(X).cpu().numpy()
 
-        Args:
-            X_test ([type]): [description]
-            y_test ([type]): [description]
-
-        Returns:
-            Accuracy
-        """
-        return accuracy_score(y_test, self.predict_labels(X_test, *args, **kwargs))
+    def accuracy(self, X_test = None, y_test=None, *args, **kwargs) -> float:
+        self._model.eval()
+        if X_test is None:
+            X_test = self._tst_data._X
+            y_test = self._tst_data._y
+        return super().accuracy(X_test, y_test, *args, **kwargs)
 
     def grp_accuracy(self, X_test=None, y_test=None, Beta_test=None, *args, **kwargs) -> dict:
         """Computes the accuracy on a per group basis
@@ -300,18 +296,28 @@ class NNthHelper(ABC):
         dir.mkdir(exist_ok=True, parents=True)
         fname = dir / f"{self._def_name}{suffix}.pt"
         torch.save(self._model.state_dict(), fname)
+
+    def save_model_defname(self, suffix=""):
+        dir = self._def_dir
+        fname = dir / f"{self._def_name}{suffix}-optim.pt"
+        torch.save(self._optimizer.state_dict(), fname)
     
     def load_model_defname(self, suffix=""):
         fname = self._def_dir / f"{self._def_name}{suffix}.pt"
         print(f"Loaded NN theta model from {str(fname)}")
         self._model.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
+    def save_model_defname(self, suffix=""):
+        dir = self._def_dir
+        fname = dir / f"{self._def_name}{suffix}-optim.pt"
+        self._optimizer.load_state_dict(torch.load(fname, map_location=cu.get_device()))
+
 class LRNNthHepler(NNthHelper):  
     def __init__(self, in_dim, n_classes, dh:ourdh.DataHelper, *args, **kwargs) -> None:
         self.in_dim = in_dim
         self.n_classes = n_classes
-        model = LRModel(in_dim=in_dim, n_classes=n_classes, args=args, kwargs=kwargs)
-        super(LRNNthHepler, self).__init__(model, dh, args, kwargs)
+        model = LRModel(in_dim=in_dim, n_classes=n_classes, *args, **kwargs)
+        super(LRNNthHepler, self).__init__(model, dh, *args, **kwargs)
 
         tu.init_weights(self._model)
         self._model.to(cu.get_device())
@@ -376,29 +382,81 @@ class LRNNthHepler(NNthHelper):
                 tq.set_postfix({"Loss": loss.item()})
                 tq.update(1)
 
-    def accuracy(self, X_test = None, y_test=None, *args, **kwargs) -> float:
-        self._model.eval()
-        if X_test is None:
-            X_test = self._tst_data._X
-            y_test = self._tst_data._y
-        return super().accuracy(X_test, y_test, *args, **kwargs)
-
-    def predict_labels(self, X):
-        self._model.eval()
-        with torch.no_grad():
-            if not isinstance(X, torch.Tensor):
-                X = torch.Tensor(X).to(cu.get_device())
-            X = X.to(cu.get_device())
-            return self._model.forward_labels(X).cpu().numpy()
-    
-    def predict_proba(self, X):
-        self._model.eval()
-        with torch.no_grad():
-            if not isinstance(X, torch.Tensor):
-                X = torch.Tensor(X)
-            X = X.to(cu.get_device())
-            return self._model.forward_proba(X).cpu().numpy()
-
     @property
     def _def_name(self):
         return "nntheta_lr"
+
+class ResNETNNthHepler(NNthHelper):  
+    def __init__(self, n_classes, dh:ourdh.DataHelper, *args, **kwargs) -> None:
+        self.n_classes = n_classes
+        model = ResNET(out_dim=n_classes, *args, **kwargs)
+        super(ResNETNNthHepler, self).__init__(model, dh, *args, **kwargs)
+
+        # For Resnet, we should never initialize weights
+        self._model.to(cu.get_device())
+
+        self._optimizer = optim.SGD(
+            self._model.parameters(), lr=self._lr, momentum=self._momentum
+            )
+        
+    def fit_data(self, loader:data_utils.DataLoader=None, trn_wts=None,
+                        epochs=None, steps=None, *args, **kwargs):
+        """fits the data on the Dataloader that is passed
+
+        Args:
+            loader (data_utils.DataLoader): [description]
+            trn_wts ([type], optional): [description]. Defaults to None. weights to be associated with each traning sample.
+            epochs ([type], optional): [description]. Defaults to None. 
+            steps ([type], optional): [description]. Defaults to None.
+        """
+        assert not(epochs is not None and steps is not None), "We will run either the specified SGD steps or specified epochs over data. We cannot run both"
+        assert not(epochs is None and steps is None), "We need atleast one of steps or epochs to be specified"
+
+        global_step = 0
+        total_sgd_steps = np.inf
+        total_epochs = 10
+        if steps is not None:
+            total_sgd_steps = steps
+        if epochs is not None:
+            total_epochs = epochs
+
+        self._model.train()
+
+        if loader is None:
+            loader = self._trn_loader
+
+        # Initialize weights to perform average loss
+        if trn_wts is None:
+            trn_wts = np.ones(len(loader.dataset))
+        assert len(trn_wts) == len(loader.dataset), "Pass all weights. If you intend not to train on an example, then pass the weight as 0"
+        trn_wts = torch.Tensor(trn_wts).to(cu.get_device())
+    
+        def do_post_fit():
+            # print(f"Accuracy: {self.accuracy()}")
+            return
+
+        for epoch in range(total_epochs):
+            tq = tqdm(total=len(loader))
+            for epoch_step, (batch_ids, batch_zids, x, y, z, beta) in enumerate(loader):
+                global_step += 1
+                if global_step == total_sgd_steps:
+                    do_post_fit()
+                    return
+
+                x, y, batch_ids = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), batch_ids.to(cu.get_device(), dtype=torch.int64)
+                self._optimizer.zero_grad()
+                
+                # For xent loss, we need only pass unnormalized logits. https://stackoverflow.com/questions/49390842/cross-entropy-in-pytorch
+                cls_out = self._model.forward(x)
+                loss = self._xecri_perex(cls_out, y)
+                loss = torch.dot(loss, trn_wts[batch_ids]) / torch.sum(trn_wts[batch_ids])
+                
+                loss.backward()
+                self._optimizer.step()
+
+                tq.set_postfix({"Loss": loss.item()})
+                tq.update(1)
+
+    @property
+    def _def_name(self):
+        return "nntheta_resnet"

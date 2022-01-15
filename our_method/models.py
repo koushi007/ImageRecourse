@@ -1,6 +1,7 @@
 from numpy.core.defchararray import index
 import torch.nn as nn
 import torch
+from torchvision import models as tv_models
 
 class LRModel(nn.Module):
     def __init__(self, in_dim, n_classes, *args, **kwargs):
@@ -23,7 +24,6 @@ class LRModel(nn.Module):
         probs = self.forward_proba(input)
         probs, labels = torch.max(probs, dim=1)
         return labels
-
 
 class FNN(nn.Module):
     """creates a Feed Forward Neural network with the specified Architecture
@@ -70,3 +70,29 @@ class FNN(nn.Module):
         """
         assert self.out_dim == 1, "If u need more than one output, why are u calling this?"
         return torch.sigmoid(self.forward(x, beta)).squeeze()
+
+class ResNET(nn.Module):
+    def __init__(self, out_dim, *args, **kwargs):
+        super().__init__()
+        self.out_dim = out_dim
+
+        self.resnet_features =  tv_models.resnet18(pretrained=True)
+        self.emb_dim = self.resnet_features.fc.in_features
+        self.resnet_features.fc = nn.Linear(self.emb_dim, self.out_dim)
+
+        self.sm = nn.Softmax(dim=1)
+
+    def forward_proba(self, input):
+        out = self.resnet_features(input)
+        return self.sm(out)
+    
+    def forward(self, input):
+        return self.resnet_features(input)
+    
+    def forward_labels(self, input):
+        probs = self.forward_proba(input)
+        probs, labels = torch.max(probs, dim=1)
+        return labels
+
+
+        
