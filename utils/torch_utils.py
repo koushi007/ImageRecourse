@@ -152,7 +152,7 @@ class CustomTensorDataset(data_utils.Dataset):
         return data_id, z_id, x, y, z, beta
 
     def __len__(self):
-        return len(self.data_ids)
+        return self.X.shape[0]
 
 
 def get_lr_scheduler(optimizer, scheduler_name, n_rounds=None):
@@ -186,5 +186,14 @@ def get_lr_scheduler(optimizer, scheduler_name, n_rounds=None):
 
     else:
         raise NotImplementedError("Other learning rate schedulers are not implemented")
+
+
+def get_loader_subset(loader:data_utils.DataLoader, subset_idxs:list, shuffle=False):
+    """Returns a data loader with the mentioned subset indices
+    """
+    subset_ds = data_utils.Subset(dataset=loader.dataset, indices=subset_idxs)
+    return data_utils.DataLoader(subset_ds, batch_size=loader.batch_size, shuffle=shuffle)
+
+
 
 

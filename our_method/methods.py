@@ -37,7 +37,7 @@ class MethodsHelper(ABC):
         self.rech = rechlpr
 
         self.R = torch.Tensor(self.rech._R).to(cu.get_device(), dtype=torch.int64)
-        self.rech.set_Sij()
+        self.rech.set_Sij(margin=0)
         self.Sij = torch.Tensor(self.rech._Sij).to(cu.get_device(), dtype=torch.int64)
 
         self.optim = None

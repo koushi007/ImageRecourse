@@ -9,11 +9,16 @@ import utils.our_main_helper as main_helper
 cu.set_cuda_device(0)
 cu.set_seed(42)
 
+freezed_suffixes = []
+
 if __name__ == "__main__":
 
 # %% Hyperparamrs and config section
     nn_theta_type = constants.RESNET
     models_defname = "-resnet"
+
+    assert models_defname not in freezed_suffixes, "Please dont corrupt the freezed models and logs"
+
     dataset_name = constants.SHAPENET # shapenet_sample, shapenet
 
     budget = 500
@@ -38,17 +43,18 @@ if __name__ == "__main__":
 
     dh = main_helper.get_data_helper(dataset_name = dataset_name)
     
-    sw = SummaryWriter("tblogs/resnet_theta")
+    sw = SummaryWriter(f"tblogs/nn_theta/{models_defname}")
     nnth_args = {
-        constants.SW: sw
+        # constants.SW: sw
     }
     nnth_mh = main_helper.fit_theta(nn_theta_type=nn_theta_type, models_defname=models_defname,
                                             dh = dh, nnth_epochs=50,
-                                            fit=True, **nnth_args)
+                                            fit=False, **nnth_args)
+    
 
-#     greedy_r = main_helper.greedy_recourse(nnth_mh=nnth_mh, dh=dh, budget=budget, 
-#                                             grad_steps=grad_steps, num_badex=num_badex, models_defname=models_defname,
-#                                             fit = False)
+    greedy_r = main_helper.greedy_recourse(dataset_name=dataset_name, nnth_mh=nnth_mh, dh=dh, budget=budget, 
+                                            grad_steps=grad_steps, num_badex=-1, models_defname=models_defname,
+                                            fit = True)
 
 #     if tune_theta_R == True:
 #         main_helper.fit_R_theta(synR=greedy_r, models_defname=models_defname)

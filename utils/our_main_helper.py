@@ -89,7 +89,7 @@ def get_data_helper(dataset_name):
         test_args = {
             constants.TRANSFORM: constants.RESNET_TRANSFORMS["test"]
         }
-        X, Z,  Beta, Y, Ins, _, _ = test
+        X, Z,  Beta, Y, Ins, _, ideal_betas = test
         test_data = ourdh.ShapenetData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
                                         Siblings=None, Z_ids=A(Ins),
                                         ideal_betas=A(ideal_betas), **test_args)
@@ -97,7 +97,7 @@ def get_data_helper(dataset_name):
         val_args = {
             constants.TRANSFORM: constants.RESNET_TRANSFORMS["val"]
         }
-        X, Z,  Beta, Y, Ins, _, _ = val
+        X, Z,  Beta, Y, Ins, _, ideal_betas = val
         val_data = ourdh.ShapenetData(A(X), A(Y), A(Z), A(Beta), B_per_i=B_per_i, 
                                         Siblings=None, Z_ids=A(Ins),
                                         ideal_betas=A(ideal_betas), **val_args)
@@ -142,9 +142,9 @@ def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epoc
     else:
         nnth_mh.load_model_defname(suffix=models_defname)
 
-    print(f"Accuracy of {nn_theta_type} trained nn_theta: {nnth_mh.accuracy()}")
-    print(f"Grp Accuracy of {nn_theta_type} the ERM model is ")
-    cu.dict_print(nnth_mh.grp_accuracy())
+    # print(f"Accuracy of {nn_theta_type} trained nn_theta: {nnth_mh.accuracy()}")
+    # print(f"Grp Accuracy of {nn_theta_type} the ERM model is ")
+    # cu.dict_print(nnth_mh.grp_accuracy())
     return nnth_mh
 
 
@@ -158,24 +158,30 @@ def fit_R_theta(synR:ourr.RecourseHelper, models_defname):
 
 
 
-def greedy_recourse(nnth_mh:ournnth.NNthHelper, dh:ourdh.DataHelper, budget, grad_steps, num_badex, models_defname, fit):
+def greedy_recourse(dataset_name, nnth_mh:ournnth.NNthHelper, dh:ourdh.DataHelper, budget, grad_steps, num_badex, models_defname, 
+                        fit, *args, **kwargs):
+    
     cu.set_seed()
-    synR = ourr.SynRecourseHelper(nnth_mh, dh, budget=budget, grad_steps=grad_steps, num_badex=num_badex)
 
+    if dataset_name == constants.SYNTHETIC:
+        rechlpr = ourr.SynRecourseHelper(nnth_mh, dh, budget=budget, grad_steps=grad_steps, num_badex=num_badex, *args, **kwargs)
+    elif dataset_name == constants.SHAPENET or dataset_name == constants.SHAPENET_SAMPLE:
+        rechlpr = ourr.ShapenetRecourseHelper(nnth=nnth_mh, dh = dh, budget=budget, 
+                                                grad_steps=grad_steps, num_badex=num_badex, *args, **kwargs)
     # fit
     if fit == True:
         print("Fitting Recourse")
-        synR.recourse_theta()
-        print(f"Accuracy on last step of Recourse: {synR._nnth.accuracy()}")
-        synR.dump_recourse_state_defname(suffix=models_defname)
+        rechlpr.recourse_theta()
+        print(f"Accuracy on last step of Recourse: {rechlpr._nnth.accuracy()}")
+        rechlpr.dump_recourse_state_defname(suffix=models_defname)
 
     # load
     else:
-        synR.load_recourse_state_defname(suffix=models_defname)
+        rechlpr.load_recourse_state_defname(suffix=models_defname)
     
-    print(f"Accuracy after loading the recourse model is: {synR._nnth.accuracy()}")
+    print(f"Accuracy after loading the recourse model is: {rechlpr._nnth.accuracy()}")
     
-    return synR
+    return rechlpr
 
 
 def fit_nnphi(dh:ourdh.DataHelper, synR:ourr.RecourseHelper, models_defname, fit):

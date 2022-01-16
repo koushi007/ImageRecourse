@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import sklearn
+from sympy import isprime
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -129,7 +130,7 @@ class NNthHelper(ABC):
 
     @property
     def _def_dir(self):
-        return Path("our_method/results/syn/models")
+        return Path("our_method/results/models/nn_theta")
 
     @property
     def _momentum(self):
@@ -225,19 +226,20 @@ class NNthHelper(ABC):
             X = X.to(cu.get_device())
             return self._model.forward_proba(X).cpu().numpy()
 
-    def accuracy(self, X_test = None, y_test=None, *args, **kwargs) -> float:
+    def accuracy(self, X_test = None, y_test=None, loader=None, *args, **kwargs) -> float:
         self._model.eval()
         if X_test is not None:
             return accuracy_score(y_test, self.predict_labels(X_test, *args, **kwargs))
         else:
-            loader = self._tst_loader
+            if loader is None:
+                loader = self._tst_loader
             accs = []
             for _, _, x, y, _, _ in loader:
-                accs.append(accuracy_score(y.cpu().numpy(), self.predict_labels(x)))
-            return np.mean(accs)
+                accs.append(accuracy_score(y.cpu().numpy(), self.predict_labels(x)) * len(x))
+            return np.sum(accs) / len(loader.dataset)
 
 
-    def grp_accuracy(self, X_test=None, y_test=None, Beta_test=None, *args, **kwargs) -> dict:
+    def grp_accuracy(self, loader:data_utils.DataLoader, *args, **kwargs) -> dict:
         """Computes the accuracy on a per group basis
 
         Args:
@@ -248,14 +250,20 @@ class NNthHelper(ABC):
         Returns:
             dict: [description]
         """
-        raise NotImplementedError("We need to get examples using data loader now as we need to apply transforms")
-        if X_test is None:
-            X_test, y_test, Beta_test = self._tst_data._X, self._tst_data._y, self._tst_data._Beta
+        if loader is not None:
+            raise NotImplementedError()
+
+        loader = self._tst_loader
+        Beta_test = self._dh._test._Beta
+        res_dict = {}
         beta_dim = self._trn_data._Betadim
         res_dict = {}
         for beta_id in range(beta_dim):
-            beta_samples = np.where(Beta_test[:, beta_id] == 1)[0]
-            res_dict[beta_id] = self.accuracy(X_test[beta_samples], y_test[beta_samples])
+            beta_values = set(Beta_test[:, beta_id])
+            for beta_v in beta_values:
+                beta_samples = np.where(Beta_test[:, beta_id] == beta_v)[0]
+                beta_value_loader = tu.get_loader_subset(loader, beta_samples)
+                res_dict[f"id-{beta_id}:val-{beta_v}"] = self.accuracy(loader=beta_value_loader)
         return res_dict
 
 
@@ -270,10 +278,13 @@ class NNthHelper(ABC):
             np.array of losses
         """
         T = torch.Tensor
-        probs = self.predict_proba(X_test)
+        if not isinstance(X_test, T):
+            X_test, y_test = T(X_test), T(y_test)
 
+        probs = self.predict_proba(X_test)
+        
         return self._xecri_perex(
-            T(probs).to(cu.get_device()), T(y_test).to(cu.get_device())
+            T(probs).to(cu.get_device()), T(y_test).to(cu.get_device(), dtype=torch.int64)
         ).cpu().numpy()
 
     def get_loss(self, X_test, y_test):
@@ -290,11 +301,13 @@ class NNthHelper(ABC):
             [type]: [description]
         """
         T = torch.Tensor
+        if not isinstance(X_test, T):
+            X_test, y_test = T(X_test), T(y_test)
+        
         probs = self.predict_proba(X_test)
 
-        y_test = T(y_test).to(cu.get_device(), dtype=torch.int64)
         return self._xecri(
-            T(probs).to(cu.get_device()), T(y_test).to(cu.get_device())
+            T(probs).to(cu.get_device()), T(y_test).to(cu.get_device(), dtype=torch.int64)
         ).cpu().numpy()
 
     def save_model_defname(self, suffix=""):
@@ -484,7 +497,26 @@ class ResNETNNthHepler(NNthHelper):
 
             if (epoch+1) % 10 == 0:
                 self.save_model_defname(f"resnet-epoch-{epoch}")
-                self.save_op
+                self.save_optim_defname(f"resnet-epoch-{epoch}")
+
+
+    def grp_accuracy(self, X_test=None, y_test=None, Beta_test=None, *args, **kwargs) -> dict:
+        """Adding some more functionality to our Shapenet dataset
+        """
+
+        assert X_test is None, "For now i assume that we will have to get grp_acc metrics only for test data"
+        
+        res_dict = super().grp_accuracy(X_test, y_test, Beta_test, *args, **kwargs)
+
+        loader = self._tst_loader
+        ideal_beta = self._tst_data._ideal_betas
+        ideal_idxs = np.where(ideal_beta == 1)[0]
+        non_ideal_idxs = np.where(ideal_beta == 0)[0]
+        
+        res_dict["ideal_accuracy"] = self.accuracy(loader=tu.get_loader_subset(loader, ideal_idxs))
+        res_dict["non-ideal_accuracy"] = self.accuracy(loader=tu.get_loader_subset(loader, non_ideal_idxs))
+
+        return res_dict
 
     @property
     def _def_name(self):

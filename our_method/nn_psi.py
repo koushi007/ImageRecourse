@@ -59,6 +59,7 @@ class NNPsiHelper(ABC):
         trn_tgts[np.array(R_ids)] = 1
         trn_tgts_oh = np.array([1-trn_tgts, trn_tgts]).T
         batch_sampler = tu.MultilabelBalancedRandomSampler(trn_tgts_oh) 
+        raise NotImplementedError("Need to apply trans here as well")
         self.trn_loader = tu.generic_init_loader(trn_X, trn_Beta, trn_tgts, batch_size=self._batch_size, sampler=batch_sampler)
 
         self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=self._batch_size)
