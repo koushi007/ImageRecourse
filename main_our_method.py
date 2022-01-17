@@ -6,26 +6,25 @@ import our_method.constants as constants
 import utils.common_utils as cu
 import utils.our_main_helper as main_helper
 
-cu.set_cuda_device(0)
+cu.set_cuda_device(1)
 cu.set_seed(42)
-
-freezed_suffixes = []
 
 if __name__ == "__main__":
 
 # %% Hyperparamrs and config section
     nn_theta_type = constants.RESNET
-    models_defname = "-resnet"
-
-    assert models_defname not in freezed_suffixes, "Please dont corrupt the freezed models and logs"
+    nntheta_models_defname = "-resnet"
+    rec_models_defname = "-debug"
+    rec_nntheta_defname = "-debug-rectheta"
+    nntheta_fineR_models_defname = "-resnet-fineR"
 
     dataset_name = constants.SHAPENET # shapenet_sample, shapenet
 
-    budget = 500
-    num_badex = 10
+    budget = 4000
+    num_badex = 1000
     grad_steps = 10
 
-    tune_theta_R = False
+    tune_theta_R = True # For this we will start with the model that is fit on Shapenet and then finetune it further with the weighted loss function that comes out of recourse
 
     our_method = constants.METHOD1
     ourm_hlpr_args = {
@@ -36,28 +35,33 @@ if __name__ == "__main__":
         }
     }
     ourm_epochs = 100 # Number of epochs for our method
-    tbdir = (constants.TB_DIR / f"our_method/{models_defname}")
+    tbdir = constants.TB_DIR / f"our_method/{nntheta_models_defname}"
 
 
 # %% Create all the needed objects
 
     dh = main_helper.get_data_helper(dataset_name = dataset_name)
     
-    sw = SummaryWriter(f"tblogs/nn_theta/{models_defname}")
+    sw = SummaryWriter(f"tblogs/nn_theta/{nntheta_models_defname}")
     nnth_args = {
         # constants.SW: sw
     }
-    nnth_mh = main_helper.fit_theta(nn_theta_type=nn_theta_type, models_defname=models_defname,
+    nnth_mh = main_helper.fit_theta(nn_theta_type=nn_theta_type, models_defname=nntheta_models_defname,
                                             dh = dh, nnth_epochs=50,
                                             fit=False, **nnth_args)
     
 
     greedy_r = main_helper.greedy_recourse(dataset_name=dataset_name, nnth_mh=nnth_mh, dh=dh, budget=budget, 
-                                            grad_steps=grad_steps, num_badex=-1, models_defname=models_defname,
-                                            fit = True)
+                                            grad_steps=grad_steps, num_badex=1000, models_defname=rec_models_defname,
+                                            fit = False)
 
-#     if tune_theta_R == True:
-#         main_helper.fit_R_theta(synR=greedy_r, models_defname=models_defname)
+    sw = SummaryWriter(f"tblogs/rec_nn_theta/{rec_nntheta_defname}")
+    recnnth_args = {
+        constants.SW: sw
+    }
+
+    if tune_theta_R == True:
+        main_helper.fit_R_theta(synR=greedy_r, models_defname=nntheta_fineR_models_defname, epochs=5)
 
 #     nnphi = main_helper.fit_nnphi(dh=dh, synR=greedy_r, models_defname=models_defname, 
 #                                     fit=False)

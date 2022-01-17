@@ -148,9 +148,9 @@ def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epoc
     return nnth_mh
 
 
-def fit_R_theta(synR:ourr.RecourseHelper, models_defname):
+def fit_R_theta(synR:ourr.RecourseHelper, models_defname, epochs=1):
     # rfit
-    synR.nnth_rfit(epochs=1)
+    synR.nnth_rfit(epochs=epochs)
     print(f"Accuracy after finetuning nntheta on Recourse set with weighted ERM is {synR._nnth.accuracy()}")
     print(f"Grp Accuracy of the rfit finetuned model is ")
     cu.dict_print(synR._nnth.grp_accuracy())
