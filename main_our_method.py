@@ -5,6 +5,7 @@ from torch.utils.tensorboard.writer import SummaryWriter
 import our_method.constants as constants
 import utils.common_utils as cu
 import utils.our_main_helper as main_helper
+import torch
 
 cu.set_cuda_device(1)
 cu.set_seed(42)
@@ -17,6 +18,7 @@ if __name__ == "__main__":
     rec_models_defname = "-debug"
     rec_nntheta_defname = "-debug-rectheta"
     nntheta_fineR_models_defname = "-resnet-fineR"
+    nnphi_models_defname = "-resnet-budget=500"
 
     dataset_name = constants.SHAPENET # shapenet_sample, shapenet
 
@@ -59,19 +61,25 @@ if __name__ == "__main__":
     recnnth_args = {
         constants.SW: sw
     }
-
     if tune_theta_R == True:
         main_helper.fit_R_theta(synR=greedy_r, models_defname=nntheta_fineR_models_defname, epochs=5)
 
-#     nnphi = main_helper.fit_nnphi(dh=dh, synR=greedy_r, models_defname=models_defname, 
-#                                     fit=False)
-    
-#     psi_arch_args = {
-#         "nn_arch": [10, 6]
-#     }
-#     nnpsi = main_helper.fit_nnpsi(dh=dh, nnarch_args=psi_arch_args, synR=greedy_r, 
-#                                     epochs=20, models_defname=models_defname, 
-#                                     fit=False)
+
+    sw = SummaryWriter(f"tblogs/nnphi/{rec_nntheta_defname}")
+    nnphi_args = {
+        constants.SW: sw
+    }
+    nnphi = main_helper.fit_nnphi(dataset_name=dataset_name, dh = dh, greedyR=greedy_r, models_defname=nnphi_models_defname, 
+                                    fit = True, **nnphi_args)
+    # tgt_betas = nnphi.collect_tgt_betas()
+    # torch.save(tgt_betas, "our_method/results/models/nnphi/tgtbetas-budget=500.pt")
+
+    # psi_arch_args = {
+    #     "nn_arch": [10, 6]
+    # }
+    # nnpsi = main_helper.fit_nnpsi(dh=dh, nnarch_args=psi_arch_args, synR=greedy_r, 
+    #                                 epochs=20, models_defname=nnphi_models_defname, 
+    #                                 fit=False)
 
 
 # # %% Kick starts our method training

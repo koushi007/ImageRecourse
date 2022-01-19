@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 import our_method.data_helper as ourdh
 from our_method.data_helper import Data
-from our_method.models import FNN, LRModel
+from our_method.models import FNN, LRModel, ResNETRecourse
 from our_method.nn_theta import NNthHelper
 from our_method.recourse import RecourseHelper
 import our_method.constants as constants
@@ -56,7 +56,7 @@ class NNPhiHelper(ABC):
         trn_Beta = self._trn_data._Beta
         trn_Sij = np.array(self._rechlpr._Sij)
         trn_sibs = self._trn_data._Siblings
-        trn_losses = self._rechlpr._nnth.get_loss_perex(trn_X, trn_y)
+        trn_losses = self._rechlpr._nnth.get_loaderloss_perex()
         sib_losses = np.array([trn_losses[sib_ids] for sib_ids in trn_sibs])
         # now get the target beta. We only compute the sibnling betas here. Create the target as please later
         trn_sib_beta = np.array([
@@ -64,8 +64,17 @@ class NNPhiHelper(ABC):
         ])
         
         R_ids = np.array(self._rechlpr._R)
-        self.trn_loader = tu.generic_init_loader(R_ids, trn_X[R_ids], trn_Beta[R_ids], trn_sib_beta[R_ids], trn_Sij[R_ids], sib_losses[R_ids], 
-                shuffle=True, batch_size=self._batch_size)
+        # self.trn_loader = tu.generic_init_loader(R_ids, trn_X[R_ids], trn_Beta[R_ids], trn_sib_beta[R_ids], trn_Sij[R_ids], sib_losses[R_ids], 
+        #         shuffle=True, batch_size=self._batch_size)
+
+        phids_args = {
+            constants.TRANSFORM: self._dh._train.transform
+        }
+        T = torch.Tensor
+        phi_ds = tu.CustomPhiDataset(R_ids=T(R_ids).to(dtype=torch.int64), X=T(trn_X[R_ids]), Beta=T(trn_Beta[R_ids]),
+                    Sib_beta=T(trn_sib_beta[R_ids]), Sij=T(trn_Sij[R_ids]), Sib_losses=T(sib_losses[R_ids]), 
+                    **phids_args)
+        self.trn_loader = data_utils.DataLoader(phi_ds, batch_size=self._batch_size, shuffle=True)
 
         self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=self._batch_size)
         self.val_loader = self._dh._val.get_loader(shuffle=False, batch_size=self._batch_size)
@@ -262,6 +271,29 @@ class NNPhiHelper(ABC):
         print(f"Loaded model from {str(fname)}")
         self._phimodel.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
+    def collect_tgt_betas(self):
+        global_step = 0
+        loader = self._trn_loader
+        tq = tqdm(total=len(loader))
+
+        tgt_betas = []
+
+        for epoch_step, (rids, X, Beta, SibBeta, Sij, Siblosses) in enumerate(loader):
+
+            X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device()),\
+                    SibBeta.to(cu.get_device()), Siblosses.to(cu.get_device())
+
+            sel_min = lambda t, losses_i : torch.squeeze(t[torch.argmin(losses_i)])
+
+            tgt_beta = torch.vstack([
+                sel_min(SibBeta[entry], Siblosses[entry]) for entry in range(X.size(0)) 
+            ])
+            tgt_betas.append(tgt_beta)
+
+        return torch.vstack(tgt_betas)
+
+
+
 class SynNNPhiMeanHelper(NNPhiHelper):  
     """This is the default class for BBPhi.
     This des mean Recourse of Betas
@@ -330,7 +362,6 @@ class SynNNPhiMeanHelper(NNPhiHelper):
     def _def_name(self):
         return f"nnphi_{self.nn_arch}"
 
-
 class SynNNPhiMinHelper(NNPhiHelper):  
     """This is the default class for BBPhi.
     This des mean Recourse of Betas
@@ -391,6 +422,75 @@ class SynNNPhiMinHelper(NNPhiHelper):
 
                 loss.backward()
                 self._optimizer.step()
+                tq.set_postfix({"Loss": loss.item()})
+                tq.update(1)                
+        
+
+    @property
+    def _def_name(self):
+        return f"nnphimin_{self.nn_arch}"
+
+class ShapenetNNPhiMinHelper(NNPhiHelper):  
+    """This is the default class for BBPhi.
+    This des mean Recourse of Betas
+
+    Args:
+        NNPhiHelper ([type]): [description]
+    """
+    def __init__(self, in_dim, out_dim, nn_arch:list, rechlpr:RecourseHelper, dh:ourdh.DataHelper, *args, **kwargs) -> None:
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.nn_arch = nn_arch
+
+        # if u need dropouts, pass it in kwargs
+        phimodel = ResNETRecourse(out_dim=1, nn_arch=nn_arch, beta_dims=dh._train._BetaShape, prefix="shapenetnnphi", *args, **kwargs)
+        super(ShapenetNNPhiMinHelper, self).__init__(phimodel, rechlpr, dh, args, kwargs)
+
+        self._phimodel.to(cu.get_device())
+        
+
+        self._optimizer = AdamW([
+            {'params': self._phimodel.parameters()},
+        ], lr=self._lr)
+        
+    def fit_rec_beta(self, epochs, loader:data_utils.DataLoader=None, *args, **kwargs):
+        """fits the data on the Dataloader that is passed
+
+        Args:
+            loader (data_utils.DataLoader): [description]
+            epochs ([type], optional): [description]. Defaults to None. 
+        """
+        global_step = 0
+        self._phimodel.train()
+        if loader is None:
+            loader = self._trn_loader
+        else:
+            warnings.warn("Are u sure u want to pass a custom loader?")
+
+        for epoch in range(epochs):
+            tq = tqdm(total=len(loader))
+            for epoch_step, (rids, X, Beta, SibBeta, Sij, Siblosses) in enumerate(loader):
+                global_step += 1
+
+                X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device()),\
+                     SibBeta.to(cu.get_device()), Siblosses.to(cu.get_device())
+
+                sel_min = lambda t, losses_i : torch.squeeze(t[torch.argmin(losses_i)])
+
+                tgt_beta = torch.vstack([
+                    sel_min(SibBeta[entry], Siblosses[entry]) for entry in range(X.size(0)) 
+                ])
+
+                self._optimizer.zero_grad()
+                beta_preds = self._phimodel.forward(X, Beta)
+
+                loss = torch.sum([self._xecri(beta_preds[entry], tgt_beta[entry]) for entry in beta_preds])
+
+                loss = self._msecri(beta_preds, tgt_beta)
+
+                loss.backward()
+                self._optimizer.step()
+                self._sw.add_scalar("beta_loss", loss.item())
                 tq.set_postfix({"Loss": loss.item()})
                 tq.update(1)                
         
