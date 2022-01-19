@@ -6,6 +6,8 @@ import our_method.constants as constants
 import utils.common_utils as cu
 import utils.our_main_helper as main_helper
 import torch
+import numpy as np
+import sys
 
 cu.set_cuda_device(1)
 cu.set_seed(42)
@@ -15,23 +17,24 @@ if __name__ == "__main__":
 # %% Hyperparamrs and config section
     nn_theta_type = constants.RESNET
     nntheta_models_defname = "-resnet"
-    rec_models_defname = "-debug"
-    rec_nntheta_defname = "-debug-rectheta"
-    nntheta_fineR_models_defname = "-resnet-fineR"
-    nnphi_models_defname = "-resnet-budget=500"
+    rec_models_defname = "-min"
+    # rec_nntheta_defname = "-debug-rectheta-ft5epochs-adam1e-5"
+    # nnth_fineR_defname = "-resnet-fineR-scratch-sgd"
+    # nnphi_models_defname = "-resnet-budget=500"
 
     dataset_name = constants.SHAPENET # shapenet_sample, shapenet
 
-    budget = 4000
+    budget = 500
     num_badex = 1000
-    grad_steps = 10
+    grad_steps = 50
 
-    tune_theta_R = True # For this we will start with the model that is fit on Shapenet and then finetune it further with the weighted loss function that comes out of recourse
+    tune_theta_R = False # For this we will start with the model that is fit on Shapenet and then finetune it further with the weighted loss function that comes out of recourse
+    tune_theta_R_Scratch = False
 
-    our_method = constants.METHOD1
+    our_method = constants.SEQUENTIAL
     ourm_hlpr_args = {
         constants.PRETRN_THPSIPSI: {
-            constants.THETA: False,
+            constants.THETA: True,
             constants.PHI: False,
             constants.PSI: False
         }
@@ -55,24 +58,28 @@ if __name__ == "__main__":
 
     greedy_r = main_helper.greedy_recourse(dataset_name=dataset_name, nnth_mh=nnth_mh, dh=dh, budget=budget, 
                                             grad_steps=grad_steps, num_badex=1000, models_defname=rec_models_defname,
-                                            fit = False)
+                                            fit = True)
 
-    sw = SummaryWriter(f"tblogs/rec_nn_theta/{rec_nntheta_defname}")
-    recnnth_args = {
-        constants.SW: sw
-    }
-    if tune_theta_R == True:
-        main_helper.fit_R_theta(synR=greedy_r, models_defname=nntheta_fineR_models_defname, epochs=5)
+    sys.exit()
+
+    # sw = SummaryWriter(f"tblogs/rec_nn_theta/{rec_nntheta_defname}")
+    # recnnth_args = {
+    #     constants.SW: sw
+    # }
+    # if tune_theta_R == True:
+    #     main_helper.fit_R_theta(synR=greedy_r, scratch=tune_theta_R_Scratch, models_defname=nnth_fineR_defname, epochs=5)
 
 
-    sw = SummaryWriter(f"tblogs/nnphi/{rec_nntheta_defname}")
-    nnphi_args = {
-        constants.SW: sw
-    }
-    nnphi = main_helper.fit_nnphi(dataset_name=dataset_name, dh = dh, greedyR=greedy_r, models_defname=nnphi_models_defname, 
-                                    fit = True, **nnphi_args)
+    # sw = SummaryWriter(f"tblogs/nnphi/{rec_nntheta_defname}")
+    # nnphi_args = {
+    #     constants.SW: sw
+    # }
+    # nnphi = main_helper.fit_nnphi(dataset_name=dataset_name, dh = dh, greedyR=greedy_r, models_defname=nnphi_models_defname, 
+    #                                 fit = True, **nnphi_args)
     # tgt_betas = nnphi.collect_tgt_betas()
     # torch.save(tgt_betas, "our_method/results/models/nnphi/tgtbetas-budget=500.pt")
+
+
 
     # psi_arch_args = {
     #     "nn_arch": [10, 6]

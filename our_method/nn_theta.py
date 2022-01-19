@@ -39,6 +39,9 @@ class NNthHelper(ABC):
         self.__init_loaders()
     
     def __init_kwargs(self, kwargs:dict):
+
+        self.kwargs = kwargs
+
         if constants.LRN_RATTE in kwargs.keys():
             self.lr = kwargs[constants.LRN_RATTE]
         if constants.SW in kwargs:
@@ -404,7 +407,7 @@ class LRNNthHepler(NNthHelper):
 
     @property
     def _def_name(self):
-        return "nntheta_lr"
+        return "lr"
 
 class ResNETNNthHepler(NNthHelper):  
     def __init__(self, n_classes, dh:ourdh.DataHelper, *args, **kwargs) -> None:
@@ -451,11 +454,14 @@ class ResNETNNthHepler(NNthHelper):
         assert len(trn_wts) == len(loader.dataset), "Pass all weights. If you intend not to train on an example, then pass the weight as 0"
         trn_wts = torch.Tensor(trn_wts).to(cu.get_device())
 
-        if constants.SCHEDULER in kwargs:
-            if constants.SCHEDULER_TYPE in kwargs:
+        if constants.SCHEDULER in kwargs.keys():
+            if constants.SCHEDULER_TYPE in kwargs.keys():
                 raise NotImplementedError()
             self._lr_scheduler = tu.get_lr_scheduler(self._optimizer, scheduler_name="cosine_annealing", n_rounds=epochs)
-
+        if constants.OPTIMIZER in kwargs.keys():
+            self._optimizer = kwargs["optimizer"]
+        if constants.SW in kwargs.keys():
+            self._sw = kwargs[constants.SW]
 
         def do_post_fit():
             # print(f"Accuracy: {self.accuracy()}")
@@ -493,11 +499,6 @@ class ResNETNNthHepler(NNthHelper):
             print(f"Epoch accuracy: {epoch_acc}")
             if self._sw is not None:
                 self._sw.add_scalar("Epoch_Acc", epoch_acc, epoch)
-            
-
-            if (epoch+1) % 10 == 0:
-                self.save_model_defname(f"resnet-epoch-{epoch}")
-                self.save_optim_defname(f"resnet-epoch-{epoch}")
 
 
     def grp_accuracy(self, X_test=None, y_test=None, Beta_test=None, *args, **kwargs) -> dict:

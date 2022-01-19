@@ -1,4 +1,6 @@
 import pickle as pkl
+
+from importlib_metadata import warnings
 import our_method.methods as ourm
 import our_method.constants as constants
 import our_method.data_helper as ourdh
@@ -148,9 +150,9 @@ def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epoc
     return nnth_mh
 
 
-def fit_R_theta(synR:ourr.RecourseHelper, models_defname, epochs=1):
+def fit_R_theta(synR:ourr.RecourseHelper, scratch, models_defname, epochs=1):
     # rfit
-    synR.nnth_rfit(epochs=epochs)
+    synR.nnth_rfit(epochs=epochs, scratch=scratch)
     print(f"Accuracy after finetuning nntheta on Recourse set with weighted ERM is {synR._nnth.accuracy()}")
     print(f"Grp Accuracy of the rfit finetuned model is ")
     cu.dict_print(synR._nnth.grp_accuracy())
@@ -173,11 +175,16 @@ def greedy_recourse(dataset_name, nnth_mh:ournnth.NNthHelper, dh:ourdh.DataHelpe
         print("Fitting Recourse")
         rechlpr.recourse_theta()
         print(f"Accuracy on last step of Recourse: {rechlpr._nnth.accuracy()}")
-        rechlpr.dump_recourse_state_defname(suffix=models_defname)
+        rechlpr.dump_recourse_state_defname(suffix=models_defname, model=False)
 
     # load
     else:
-        rechlpr.load_recourse_state_defname(suffix=models_defname)
+        rechlpr.load_recourse_state_defname(suffix=models_defname, model=False)
+        rid_nosij = np.sum(rechlpr.trn_wts[rechlpr._R] != 0)
+        warnings.warn(f"There are a total of {rid_nosij} objects without Sij. Removing all such examples")
+        rechlpr._trn_wts[rechlpr._R] = 0
+        assert  np.sum(rechlpr.trn_wts[rechlpr._R] != 0) == 0, "Now all R should have been removed."
+
     
     print(f"Accuracy after loading the recourse model is: {rechlpr._nnth.accuracy()}")
     

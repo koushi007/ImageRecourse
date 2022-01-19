@@ -12,15 +12,19 @@ from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
+from sympy import C
 import torch
+from our_method.models import ResNET
 import utils.common_utils as cu
 import utils.torch_utils as tu
 from torch.optim.sgd import SGD
+from torch.optim.adamw import AdamW
 from torch.utils import data
 
 from our_method.data_helper import DataHelper
 from our_method.nn_theta import NNthHelper
 import our_method.constants as constants
+from torch.utils.tensorboard.writer import SummaryWriter
 
 
 class RecourseHelper(ABC):
@@ -204,9 +208,15 @@ class RecourseHelper(ABC):
         losses = self.get_trnloss_perex()
         for data_id in self._dh._train._data_ids:
             sib_ids = self._dh._train._Siblings[data_id]
-            self.Sij.append(np.array(
-                ( losses[sib_ids] < (losses[data_id]-margin) )*1)
-            )
+            # This is for average pooling
+            # self.Sij.append(np.array(
+            #     ( losses[sib_ids] < (losses[data_id]-margin) )*1)
+            # )
+
+            # This is for min pooling
+            arr = np.zeros(len(sib_ids))
+            arr[np.argmin(losses[sib_ids])] = 1 # argmin may be rid itself and I dont care at this point
+            self.Sij.append(arr)
         return self.Sij
 
     def assess_R_candidates(self, trn_wts, R, bad_exs, rbg_loader):
@@ -236,32 +246,27 @@ class RecourseHelper(ABC):
             warnings.warn("Why will Sij be empty when we attempt to add a bad example in R?")
             pass
         else:
-            new_wts[sib_ids] += self.Sij[rid]/sum(self.Sij[rid])
-            new_wts[rid] -= 1
-            
+            # This is for average pooling
 
-        # For elements in recourse weights should always be 0 no matter what!
-        if len(R) > 0 and np.sum(new_wts[np.array(R)]) > 0:
-            warnings.warn("Will this case ever occur? An element in R all of a sudden becomes a recourse candidate for someone else")
-            new_wts[np.array(R)] = 0
+            # numer = []
+            # for idx, sid in enumerate(sib_ids):
+            #     if  self.Sij[rid][idx] == 1 and sid not in R:
+            #         numer.append(1)
+            #     else:
+            #         numer.append(0)
+
+            # if sum(numer) != 0:
+            #     new_wts[sib_ids] += np.array(numer)/sum(numer)
+            #     new_wts[rid] -= 1
+            # else:
+            #     pass
+
+            # This is for min pooling
+            new_wts[sib_ids] += self.Sij[rid]
+            new_wts[rid] -= 1 # Note if rid happens to be the least in the group, the net effect is no change so that gain=0
         return new_wts
-
-    def simulate_rmvr(self, trn_wts, R, rid):
-        new_wts = deepcopy(trn_wts)
-        sib_ids = self._dh._train._Siblings[rid]
-        if sum(self.Sij[rid]) == 0.:
-            # If there are no sij, recourse is hopeless
-            warnings.warn("Why will Sij be empty when we attempt to add a bad example in R?")
-            pass
-        else:
-            new_wts[rid] += 1
-            new_wts[sib_ids] -= self.Sij[rid]/sum(self.Sij[rid])
-        if len(R) > 0:
-            new_wts[np.array(R)] = 0
-        return new_wts
-
     
-    def dump_recourse_state_defname(self, suffix="", model=True):
+    def dump_recourse_state_defname(self, suffix="", model=False):
         dir = self._def_dir
         dir.mkdir(parents=True, exist_ok=True)
         if model:
@@ -269,11 +274,12 @@ class RecourseHelper(ABC):
         with open(dir/f"{self._def_name}{suffix}-R-Sij.pkl", "wb") as file:
             pkl.dump({"R": self._R, "Sij": self._Sij}, file)
 
-    def load_recourse_state_defname(self, suffix=""):
+    def load_recourse_state_defname(self, suffix="", model=False):
         dir = self._def_dir
-        self._nnth._model.load_state_dict(
-            torch.load(dir/f"{self._def_name}{suffix}-nnth.pt", map_location=cu.get_device())
-        )
+        if model:
+            self._nnth._model.load_state_dict(
+                torch.load(dir/f"{self._def_name}{suffix}-nnth.pt", map_location=cu.get_device())
+            )
         with open(dir/f"{self._def_name}{suffix}-R-Sij.pkl", "rb") as file:
             rsij_dict = pkl.load(file)
             self._R, self._Sij = rsij_dict["R"], rsij_dict["Sij"]
@@ -290,7 +296,7 @@ class RecourseHelper(ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    def nnth_rfit(self, epochs, *args, **kwargs):
+    def nnth_rfit(self, epochs, scratch, *args, **kwargs):
         """nnth_rfit for recourse fit
         This function should be called after recourse.
         Here we fit the nn_theta model on a weighted loss.
@@ -308,7 +314,6 @@ class RecourseHelper(ABC):
     @abstractproperty
     def _def_name(self):
         raise NotImplementedError()
-        
 
 
 class SynRecourseHelper(RecourseHelper):
@@ -404,8 +409,11 @@ class SynRecourseHelper(RecourseHelper):
 
         return np.array(self.R), self._Sij
 
-    def nnth_rfit(self, epochs, *args, **kwargs):
+    def nnth_rfit(self, epochs, scratch, *args, **kwargs):
         # TODO: maybe we can move this also to ther parent?
+        if scratch == True:
+            tu.init_weights(self._nnth._model)
+
         self._nnth.fit_data(loader = self._nnth._trn_loader, 
                             trn_wts=self.trn_wts,
                             epochs=epochs)
@@ -417,7 +425,7 @@ class ShapenetRecourseHelper(RecourseHelper):
 
     @property
     def _def_name(self):
-        return "shapenet-greedy_rec"
+        return "shapenet"
         
 
     def set_Sij(self, margin):
@@ -482,18 +490,34 @@ class ShapenetRecourseHelper(RecourseHelper):
 
             print(f"Inside R iteration {r_iter}; Loss after minimizing on adding {sel_r} is {rec_loss}", flush=True)
 
-            if (r_iter+1) % 20 == 0:
+            if (r_iter+1) % 50 == 0:
                 self.dump_recourse_state_defname(suffix=f"riter-{r_iter}", model=False)
 
         self.all_losses_cache = None
 
         return np.array(self.R), self._Sij
     
-    def nnth_rfit(self, epochs, *args, **kwargs):
-        # TODO: maybe we can move this also to ther parent?
+    def nnth_rfit(self, scratch, epochs, *args, **kwargs):
+        
+        sw = SummaryWriter()
         rfit_args = {
-            constants.SW: "tblogs/nnth_R"
+            constants.SW: SummaryWriter(f"tblogs/nnth_R/{self._def_name}")
         }
+
+        if scratch == True:
+            # Initialize the model with pretrained resnet weights
+            self._nnth._model = ResNET(out_dim=self._nnth._trn_data._num_classes, **self._nnth.kwargs)
+            self._nnth._model = self._nnth._model.to(cu.get_device())
+
+            rfit_args[constants.OPTIMIZER] = SGD([
+                                                {'params': self._nnth._model.parameters()},
+                                            ], lr=1e-3)
+        
+        else:
+            rfit_args[constants.OPTIMIZER] = AdamW([
+                                                {'params': self._nnth._model.parameters()},
+                                            ], lr=1e-5)
+        
         self._nnth.fit_data(loader = self._nnth._trn_loader, 
                             trn_wts=self.trn_wts,
                             epochs=epochs, **rfit_args)

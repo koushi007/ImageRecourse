@@ -30,6 +30,7 @@ PRETRN_THPSIPSI = "pretrn_th_phi_psi"
 
 LRN_RATTE = "lr"
 MOMENTUM = "momentum"
+OPTIMIZER = "optimizer"
 
 SW = "summarywriter"
 BATCH_SIZE = "batch_size"

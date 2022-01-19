@@ -10,8 +10,6 @@ import torch.optim as optim
 
 def init_weights(m:nn.Module):
 
-    assert isinstance(m, ResNET) == False, "Why the hell are u initializing the weights of a pretrained model."
-
     def set_params(w):
         if isinstance(w, nn.Linear):
             torch.nn.init.xavier_uniform(w.weight)

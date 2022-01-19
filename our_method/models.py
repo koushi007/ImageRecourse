@@ -1,3 +1,4 @@
+from turtle import forward
 from numpy.core.defchararray import index
 from sympy import Lambda
 import torch.nn as nn
@@ -5,6 +6,7 @@ import torch
 from torchvision import models as tv_models
 import math
 import numpy as np
+import warnings
 
 class LRModel(nn.Module):
     def __init__(self, in_dim, n_classes, *args, **kwargs):
@@ -123,6 +125,17 @@ class PositionalEncoding(nn.Module):
         idx = torch.dot(beta, self.beta_dims)
         return self.dropout(self.pe[idx])
 
+class BetaEmbedding(nn.Module):
+
+    def __init__(self, d_model: int, beta_dim):
+        super().__init__()
+        self.beta_dims = beta_dim
+        self.Emb = nn.Embedding(beta_dim, d_model)
+
+    def forward(self, beta):
+        return self.Emb(beta)
+
+
 
     
 class ResNETRecourse(nn.Module):
@@ -135,8 +148,12 @@ class ResNETRecourse(nn.Module):
         self.emb_dim = self.resnet_features.fc.in_features
         self.resnet_features.fc = nn.Linear(self.emb_dim, self.out_dim)
         
-        self.beta_emb = PositionalEncoding(d_model=self.emb_dim, beta_dims=beta_dims, dropout=0.1)
-        warnings.warn("Change the max len here if beta were ever to be changed")
+        # self.beta_emb = PositionalEncoding(d_model=self.emb_dim, beta_dims=beta_dims, dropout=0.1)
+        # warnings.warn("Change the max len here if beta were ever to be changed")
+
+        self.beta_0_emb = BetaEmbedding(d_model=self.emb_dim, beta_dim=beta_dims[0])
+        self.beta_1_emb = BetaEmbedding(d_model=self.emb_dim, beta_dim=beta_dims[1])
+        self.beta_2_emb = BetaEmbedding(d_model=self.emb_dim, beta_dim=beta_dims[2])
 
         self.fnn = FNN(in_dim=self.emb_dim, out_dim=nn_arch[-1], nn_arch=nn_arch[:-1], prefix=prefix, *args, **kwargs)
 
@@ -148,13 +165,14 @@ class ResNETRecourse(nn.Module):
         self.sm = nn.Softmax(dim=1)
         self.relu = nn.ReLU()
 
-    def forward_proba(self, input):
-        out = self.resnet_features(input)
-        return self.sm(out)
+    def forward_proba(self, input, beta):
+        beta0, beta1, beta2 = self.forward(input, beta)
+        return [self.sm(beta0), self.sm(beta1), self.sm(beta2)]
     
     def forward(self, input, beta):
         x_emb = self.resnet_features(input)
-        beta_emb = self.beta_emb(beta)
+        beta_emb = self.beta_0_emb[beta[0]] + self.beta_1_emb[beta[1]] + self.beta_2_emb[beta[2]]
+        beta_emb /= 3
 
         xbeta_emb = x_emb + beta_emb
         xbeta_emb = self.fnn(xbeta_emb)
