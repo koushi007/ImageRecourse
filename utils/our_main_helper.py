@@ -4,7 +4,7 @@ import our_method.constants as constants
 import our_method.data_helper as ourdh
 import numpy as np
 from our_method.methods import MethodsHelper
-from our_method.nn_phi import SynNNPhiMinHelper
+from our_method.nn_phi import ShapenetNNPhiMinHelper, SynNNPhiMinHelper
 from our_method.nn_psi import SynNNPsiHelper
 import our_method.nn_theta as ournnth
 import utils.common_utils as cu
@@ -153,9 +153,9 @@ def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epoc
     return nnth_mh
 
 
-def fit_R_theta(synR:ourr.RecourseHelper, models_defname):
+def fit_R_theta(synR:ourr.RecourseHelper, models_defname, epochs=1):
     # rfit
-    synR.nnth_rfit(epochs=1)
+    synR.nnth_rfit(epochs=epochs)
     print(f"Accuracy after finetuning nntheta on Recourse set with weighted ERM is {synR._nnth.accuracy()}")
     print(f"Grp Accuracy of the rfit finetuned model is ")
     cu.dict_print(synR._nnth.grp_accuracy())
@@ -189,22 +189,26 @@ def greedy_recourse(dataset_name, nnth_mh:ournnth.NNthHelper, dh:ourdh.DataHelpe
     return rechlpr
 
 
-def fit_nnphi(dh:ourdh.DataHelper, synR:ourr.RecourseHelper, models_defname, fit):
-    nnpihHelper = SynNNPhiMinHelper(in_dim=dh._train._Xdim+dh._train._Betadim, out_dim=dh._train._Betadim,
-                            nn_arch=[10, 6], rechlpr=synR, dh=dh)
+def fit_nnphi(dataset_name, dh:ourdh.DataHelper, greedyR:ourr.RecourseHelper, models_defname, fit, *args, **kwargs):
+
+    if dataset_name == constants.SYNTHETIC:
+        nnpihHelper = SynNNPhiMinHelper(in_dim=dh._train._Xdim+dh._train._Betadim, out_dim=dh._train._Betadim,
+                                nn_arch=[10, 6], rechlpr=greedyR, dh=dh, *args, **kwargs)
+    elif dataset_name == constants.SHAPENET or dataset_name == constants.SHAPENET_SAMPLE:
+        nnpihHelper = ShapenetNNPhiMinHelper(in_dim=None, out_dim=1, nn_arch=[128, 64, 16], 
+                                            rechlpr=greedyR, dh=dh, *args, **kwargs)
 
     # fit
     if fit == True:
         print("fitting NPhi")
-        nnpihHelper.fit_rec_beta(epochs=100)
+        nnpihHelper.fit_rec_beta(epochs=30)
         nnpihHelper.save_model_defname(suffix=models_defname)
     # load
     else:
         nnpihHelper.load_model_defname(suffix=models_defname)
     
-    pred_betas, aft_acc, bef_acc = nnpihHelper.recourse_accuracy(dh._test._X, dh._test._y, dh._test._Z, dh._test._Beta)
-    
-    print(f"Accuracy Before = {bef_acc}; After = {aft_acc}; pred_betas from phi: {np.sum(pred_betas, axis=0)}")
+    # pred_betas, aft_acc, bef_acc = nnpihHelper.recourse_accuracy(dh._test._X, dh._test._y, dh._test._Z, dh._test._Beta)
+    # print(f"Accuracy Before = {bef_acc}; After = {aft_acc}; pred_betas from phi: {np.sum(pred_betas, axis=0)}")
     return nnpihHelper
 
 

@@ -187,6 +187,10 @@ class Data(ABC):
     def apply_recourse(self, data_id, betas):
         raise NotImplementedError()
 
+    @abstractproperty
+    def _BetaShape(self):
+        raise NotImplementedError()
+
 class SyntheticData(Data):
     def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs) -> None:
         super(SyntheticData, self).__init__(X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs)
@@ -202,6 +206,10 @@ class SyntheticData(Data):
         _, _, z, _ = self.get_instances(data_ids)
         assert z.shape() == betas.shape(), "Why the hell are the shapes inconsistent?"
         return np.multiply(z, betas)
+
+    @property
+    def _BetaShape(self):
+        return self._Beta.shape[1]
 
 class ShapenetData(Data):
     def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs) -> None:

@@ -9,14 +9,12 @@ import pickle as pkl
 import warnings
 from abc import ABC, abstractmethod, abstractproperty
 from copy import deepcopy
-from os import replace
 from pathlib import Path
 
 import numpy as np
 import torch
 import utils.common_utils as cu
 import utils.torch_utils as tu
-from torch._C import dtype
 from torch.optim.sgd import SGD
 from torch.utils import data
 
@@ -40,12 +38,13 @@ class RecourseHelper(ABC):
         self.sgd_optim = SGD([
             {"params": self._nnth._model.parameters()},
         ], lr=1e-3, momentum=0, nesterov=False)
-        self.batch_size = 64
+        self.batch_size = 32
         self.lr = 1e-3
 
         self.R = []
         self.Sij = None
         self.trn_wts = np.ones(self.dh._train._num_data)
+        self.all_losses_cache = None
 
         self.__init_kwargs(kwargs)
         self.set_Sij(margin=0)
@@ -57,7 +56,6 @@ class RecourseHelper(ABC):
             self.lr = kwargs[constants.LRN_RATTE]
 
     def init_trn_wts(self):
-        raise NotImplementedError("Debug this")
         for rid in self.R:
             self.trn_wts = self.simulate_addr(trn_wts=self.trn_wts, R=self.R, rid=rid)
 
@@ -107,6 +105,9 @@ class RecourseHelper(ABC):
     @property
     def _R(self):
         return self.R
+    @_R.setter
+    def _R(self, value):
+        self.R = value
 
     @property
     def _trn_wts(self):
@@ -134,6 +135,9 @@ class RecourseHelper(ABC):
 # %% some utility functions
 
     def get_trnloss_perex(self) -> np.array:
+        if self.all_losses_cache is not None:
+            return self.all_losses_cache
+        
         loader = self._dh._train.get_loader(shuffle=False, batch_size=self._batch_size)
         batch_losses = lambda batchx, batchy: self._nnth.get_loss_perex(batchx, batchy)
         all_losses = np.hstack([batch_losses(x, y) for dids, zids, x, y, _, _ in loader])
@@ -169,17 +173,17 @@ class RecourseHelper(ABC):
             ex_trnwts ([type]): [description]
         """
         self._nnth._model.train()
-        for sgd_epoch in range(self._grad_steps):
-            for data_ids, zids, x, y, z, b in loader:
-                data_ids, x, y = data_ids.to(cu.get_device(), dtype=torch.int64), x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64)
-                self._SGD_optim.zero_grad()
+        for data_ids, zids, x, y, z, b in loader:
+            data_ids, x, y = data_ids.to(cu.get_device(), dtype=torch.int64), x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64)
+            self._SGD_optim.zero_grad()
 
-                pred_probs = self._nnth._model.forward(x)
-                loss = self._nnth._xecri_perex(pred_probs, y)
-                loss = torch.dot(loss, ex_trnwts[data_ids]/loss.size(0))
+            pred_probs = self._nnth._model.forward(x)
+            loss = self._nnth._xecri_perex(pred_probs, y)
+            loss = torch.dot(loss, ex_trnwts[data_ids]/loss.size(0))
 
-                loss.backward()
-                self._SGD_optim.step()
+            loss.backward()
+            self._SGD_optim.step()
+        
 
     def set_Sij(self, margin, loader=None):
         """This method find the set Sij for every ij present in the dataset.
@@ -237,7 +241,7 @@ class RecourseHelper(ABC):
             
 
         # For elements in recourse weights should always be 0 no matter what!
-        if np.sum(new_wts[np.array(R)]) > 0:
+        if len(R) > 0 and np.sum(new_wts[np.array(R)]) > 0:
             warnings.warn("Will this case ever occur? An element in R all of a sudden becomes a recourse candidate for someone else")
             new_wts[np.array(R)] = 0
         return new_wts
@@ -257,19 +261,22 @@ class RecourseHelper(ABC):
         return new_wts
 
     
-    def dump_recourse_state_defname(self, suffix=""):
+    def dump_recourse_state_defname(self, suffix="", model=True):
         dir = self._def_dir
-        torch.save(self._nnth._model.state_dict(), dir / f"{self._def_name}{suffix}-nnth.pt")
-        with open(dir/f"{self._def_name}{suffix}-R.pkl", "wb") as file:
-            pkl.dump(self.R, file)
+        dir.mkdir(parents=True, exist_ok=True)
+        if model:
+            torch.save(self._nnth._model.state_dict(), dir / f"{self._def_name}{suffix}-nnth.pt")
+        with open(dir/f"{self._def_name}{suffix}-R-Sij.pkl", "wb") as file:
+            pkl.dump({"R": self._R, "Sij": self._Sij}, file)
 
     def load_recourse_state_defname(self, suffix=""):
         dir = self._def_dir
         self._nnth._model.load_state_dict(
             torch.load(dir/f"{self._def_name}{suffix}-nnth.pt", map_location=cu.get_device())
         )
-        with open(dir/f"{self._def_name}{suffix}-R.pkl", "rb") as file:
-            self.R = pkl.load(file)
+        with open(dir/f"{self._def_name}{suffix}-R-Sij.pkl", "rb") as file:
+            rsij_dict = pkl.load(file)
+            self._R, self._Sij = rsij_dict["R"], rsij_dict["Sij"]
         print(f"Loaded Recourse from {dir}/{self._def_name}{suffix}")
 
         # Update the Sij based on the new model
@@ -301,6 +308,7 @@ class RecourseHelper(ABC):
     @abstractproperty
     def _def_name(self):
         raise NotImplementedError()
+        
 
 
 class SynRecourseHelper(RecourseHelper):
@@ -407,9 +415,10 @@ class ShapenetRecourseHelper(RecourseHelper):
     def __init__(self, nnth: NNthHelper, dh: DataHelper, budget, grad_steps=10, num_badex=100, *args, **kwargs) -> None:
         super(ShapenetRecourseHelper, self).__init__(nnth, dh, budget, grad_steps, num_badex, *args, **kwargs)
 
+    @property
     def _def_name(self):
         return "shapenet-greedy_rec"
-
+        
 
     def set_Sij(self, margin):
         """For real world datasets since we have cuda problems, better to pass a loader.
@@ -425,7 +434,7 @@ class ShapenetRecourseHelper(RecourseHelper):
         Args:
             bad_exs ([type]): [description]
         """
-        gain = np.ones(bad_exs) * -np.inf
+        gain = np.ones(len(bad_exs)) * -np.inf
         losses = self.get_trnloss_perex()
         ref_loss = np.dot(trn_wts, losses)
 
@@ -448,8 +457,7 @@ class ShapenetRecourseHelper(RecourseHelper):
 
         trnd = self._dh._train
 
-        # in the begining, all examples have equal loss weights
-        # self._trn_wts = np.ones(trnd._num_data) This is already handled in constructor.
+        self.all_losses_cache = self.get_trnloss_perex()
 
         for r_iter in range(self._budget):
 
@@ -462,16 +470,30 @@ class ShapenetRecourseHelper(RecourseHelper):
             self.R.append(sel_r)
             self._trn_wts = self.simulate_addr(self._trn_wts, self.R, sel_r)
             
+            self.all_losses_cache = None
+
             self.minze_theta(self._nnth._trn_loader, torch.Tensor(self.trn_wts).to(cu.get_device()))
             
+            self.all_losses_cache = self.get_trnloss_perex()
+
             self.set_Sij(margin=0)
 
             rec_loss = np.dot(self.get_trnloss_perex(), self._trn_wts)
 
-            print(f"Inside R iteration {r_iter}; Loss after minimizing on adding {sel_r} is {rec_loss}")
+            print(f"Inside R iteration {r_iter}; Loss after minimizing on adding {sel_r} is {rec_loss}", flush=True)
+
+            if (r_iter+1) % 20 == 0:
+                self.dump_recourse_state_defname(suffix=f"riter-{r_iter}", model=False)
+
+        self.all_losses_cache = None
 
         return np.array(self.R), self._Sij
     
     def nnth_rfit(self, epochs, *args, **kwargs):
-        raise NotImplementedError()
-        return super().nnth_rfit(epochs, *args, **kwargs)
+        # TODO: maybe we can move this also to ther parent?
+        rfit_args = {
+            constants.SW: "tblogs/nnth_R"
+        }
+        self._nnth.fit_data(loader = self._nnth._trn_loader, 
+                            trn_wts=self.trn_wts,
+                            epochs=epochs, **rfit_args)

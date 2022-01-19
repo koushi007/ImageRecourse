@@ -154,6 +154,36 @@ class CustomTensorDataset(data_utils.Dataset):
     def __len__(self):
         return self.X.shape[0]
 
+class CustomPhiDataset(data_utils.Dataset):
+    """TensorDataset with support of transforms.
+    """
+    def __init__(self, R_ids, X, Beta, Sib_beta, Sij, Sib_losses, *args,  **kwargs):
+        self.R_ids = R_ids
+        self.X = X
+        self.Beta = Beta
+        self.Sib_beta = Sib_beta
+        self.Sij = Sij
+        self.Sib_losses = Sib_losses
+
+        self.transform = None
+        if constants.TRANSFORM in kwargs:
+            self.transform = kwargs[constants.TRANSFORM]
+
+    def __getitem__(self, index):
+        r_id, x, beta, sib_beta, sij, sib_losses = self.R_ids[index], self.X[index], self.Beta[index], \
+                        self.Sib_beta[index], self.Sij[index], self.Sib_losses[index]
+
+        if self.transform is not None:
+            x = self.transform(x)
+        return r_id, x, beta, sib_beta, sij, sib_losses
+
+    def __len__(self):
+        return len(self.R_ids)
+
+
+
+
+
 
 def get_lr_scheduler(optimizer, scheduler_name, n_rounds=None):
     """
