@@ -1,12 +1,15 @@
 import abc
 from abc import ABC, abstractmethod, abstractproperty
+from ast import Constant
+from tkinter import N
 import our_method.constants as constants
 import numpy as np
 import torch
 import torch.utils.data as data_utils
 import utils.common_utils as cu
 import utils.torch_utils as tu
-
+from our_method.render_model import ShapenetRender
+from PIL import Image
 
 class Data(ABC):
     """This is an abstract class for Dataset
@@ -153,7 +156,12 @@ class Data(ABC):
             loader_args[constants.TRANSFORM] = self.transform
         return tu.init_grp_loader(self._data_ids, self._Z_ids, self._X, self._y, self._Z, self._Beta, self._B_per_i,
                                      shuffle=shuffle, batch_size=batch_size, **loader_args)
-    
+    def get_loader_with_ideal(self, shuffle, batch_size):
+        loader_args = {}
+        if self.transform is not None:
+            loader_args[constants.TRANSFORM] = self.transform
+        return tu.init_loader(self._data_ids, self._ideal_betas, self._X, self._y, self._Z, self._Beta, shuffle=shuffle, batch_size=batch_size)
+
     @property
     def _num_data(self):
         return len(self.data_ids)
@@ -207,7 +215,7 @@ class ShapenetData(Data):
     def __init__(self, X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs) -> None:
         super(ShapenetData, self).__init__(X, y, Z, Beta, B_per_i, Siblings, Z_ids, ideal_betas, *args, **kwargs)
     
-    def apply_recourse(self, data_ids, betas:np.array):
+    def apply_recourse(self, data_ids, betas:np.array,dataset = 2):
         """Applies recourse to the specified data is and returns the recoursed x
         Args:
             data_ids ([type]): [description]
@@ -215,11 +223,53 @@ class ShapenetData(Data):
         Returns:
             [type]: [description]
         """
-        raise NotImplementedError()
+        #if not isinstance(data_ids,list):
+        dataset_path = None
+        if dataset == 0:
+            dataset_path = constants.SHAPENET_TRAIN_MODEL_PATHS
+        elif dataset == 1:
+            dataset_path = constants.SHAPENET_VAL_MODEL_PATHS
+        else :
+            dataset_path = constants.SHAPENET_TEST_MODEL_PATHS
+        
+        file = open(dataset_path,"r")
+        file_lines = file.read()
+        model_path_list = file_lines.split("\n")
 
-    @property
-    def _BetaShape(self):
-        return [6, 3, 4]
+        if not isinstance(data_ids,list):
+            id = int(data_ids)
+            beta = betas.tolist()
+            model_path = model_path_list[id]
+            print(model_path)
+            shapenetrender = ShapenetRender(beta[0],constants.DIST_DICT[beta[1]],beta[2])
+            shapenetrender.render_acp(model_path+"/models/model_normalized.obj",constants.TEMP_IMG_PATH)
+            x = Image.open(constants.TEMP_IMG_PATH+".png")
+            x = np.array(x,dtype='short')
+            x = np.transpose(x,(2,0,1)) 
+            
+            return x
+
+
+
+        
+        x_list = []
+        data_ids = [i for i in data_ids]
+        betas = [i.tolist() for i in betas]
+        for id,beta in zip(data_ids,betas):
+            model_path = model_path_list[id]
+            #print(model_path)
+            shapenetrender = ShapenetRender(beta[0],constants.DIST_DICT[beta[1]],beta[2])
+            shapenetrender.render_acp(model_path+"/models/model_normalized.obj",constants.TEMP_IMG_PATH)
+            x = Image.open(constants.TEMP_IMG_PATH+".png")
+            x = np.array(x,dtype='short')
+            x = np.transpose(x,(2,0,1)) 
+            x_list.append(x)
+
+            # indx = np.where(np.logical_and(self._Z_ids == id,(self._Beta == beta).all(axis=1)))[0][0]
+            # x.append(self._X[indx])
+        return x_list 
+
+        #raise NotImplementedError()
         
 
 

@@ -53,7 +53,7 @@ def get_data_helper(dataset_name):
                 X = np.squeeze(X)
                 data_tuple.append(X)
             return data_tuple
-        train, test, val = process_data("training_shapenet_data.pkl"), process_data("validation_shapenet_data.pkl"), process_data("validation_shapenet_data.pkl")
+        train, test, val = process_data("training_shapenet_data.pkl"), process_data("testing_all_shapenet_data.pkl"), process_data("validation_shapenet_data.pkl")
 
     A = np.array
     
@@ -144,9 +144,14 @@ def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epoc
     else:
         nnth_mh.load_model_defname(suffix=models_defname)
 
-    # print(f"Accuracy of {nn_theta_type} trained nn_theta: {nnth_mh.accuracy()}")
-    # print(f"Grp Accuracy of {nn_theta_type} the ERM model is ")
-    # cu.dict_print(nnth_mh.grp_accuracy())
+    #print(f"Accuracy of {nn_theta_type} trained nn_theta: {nnth_mh.accuracy()}")
+    #print(f"Grp Accuracy of {nn_theta_type} the ERM model is ")
+    #cu.dict_print(nnth_mh.grp_accuracy())
+    #print(f"Beta Accuracy of {nn_theta_type} the ERM model is ")
+    #cu.dict_print(nnth_mh.beta_accuracy())
+    print(f"ideal to non_ideal ratios of {nn_theta_type} the ERM model is ")
+    print(nnth_mh.get_trnloss_perex())
+    
     return nnth_mh
 
 

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod, abstractproperty
 from copy import deepcopy
 from pathlib import Path
+#from statistics import quantiles
 
 import numpy as np
 import sklearn
@@ -133,7 +134,7 @@ class NNthHelper(ABC):
 
     @property
     def _def_dir(self):
-        return Path("our_method/results/models/nn_theta")
+        return Path("/mnt/infonas/data/nlokesh/image_recourse/our_method/results/models/nn_theta")
 
     @property
     def _momentum(self):
@@ -269,6 +270,52 @@ class NNthHelper(ABC):
                 res_dict[f"id-{beta_id}:val-{beta_v}"] = self.accuracy(loader=beta_value_loader)
         return res_dict
 
+    def beta_accuracy(self, loader:data_utils.DataLoader,*args, **kwargs) -> dict:
+        """Computes the accuracy on a per group basis
+
+        Args:
+            X_test ([type]): [description]
+            y_test ([type]): [description]
+            Beta_test ([type]): [description]
+
+        Returns:
+            dict: [description]
+        """
+        if loader is not None:
+            raise NotImplementedError()
+
+        loader = self._tst_loader
+        Beta_test = self._dh._test._Beta
+        y_test = self._dh._test._y
+        res_dict = {}
+        beta_all = [[3,1,0],[2,1,0],[0,1,0],[1,0,1],[4,2,2],[5,2,3],[3,2,1],[2,0,2],[0,0,3]]
+
+        # beta_dim = self._trn_data._Betadim
+        # res_dict = {}
+        for id in range(10):
+            for beta in beta_all:
+                beta_samples = np.where(np.logical_and((Beta_test == beta).all(axis=1),y_test==id))[0]
+                print(beta_samples.shape)
+                beta_value_loader = tu.get_loader_subset(loader, beta_samples)
+                res_dict[f"id-{id} beta-{beta}"] = self.accuracy(loader=beta_value_loader)
+        return res_dict
+
+    def get_trnloss_perex(self) -> dict:
+        loader = self._dh._test.get_loader_with_ideal(False,1)
+        batch_losses = lambda batchx, batchy: self.get_loss_perex(batchx, batchy)
+        all_losses = [(float(batch_losses(x, y)),ideal_beta) for dids, ideal_beta, x, y, _, _ in loader]
+        betas_sorted = [i[1] for i in sorted(all_losses,reverse=True)]
+        qu = [1, 2, 3, 5, 7, 10, 20, 30, 40, 50,100]
+        total_beta = len(betas_sorted)
+        res_dict = {}
+        for q in qu:
+            betas = betas_sorted[:int((total_beta*q)/100)]
+            betas_ideal = sum(betas)
+            ideal_to_non_ideal = betas_ideal*1.0/int((total_beta*q)/100)
+            res_dict[f"{q}"] = float(ideal_to_non_ideal)
+
+
+        return res_dict
 
     def get_loss_perex(self, X_test, y_test):
         """Gets the cross entropy loss per example
@@ -517,6 +564,25 @@ class ResNETNNthHepler(NNthHelper):
         res_dict["ideal_accuracy"] = self.accuracy(loader=tu.get_loader_subset(loader, ideal_idxs))
         res_dict["non-ideal_accuracy"] = self.accuracy(loader=tu.get_loader_subset(loader, non_ideal_idxs))
 
+        return 
+        
+    def beta_accuracy(self, X_test=None, y_test=None, Beta_test=None, *args, **kwargs) -> dict:
+
+        """Computes the accuracy on a per group basis
+
+        Args:
+            X_test ([type]): [description]
+            y_test ([type]): [description]
+            Beta_test ([type]): [description]
+
+        Returns:
+            dict: [description]
+        """
+        res_dict = super().beta_accuracy(X_test, y_test, Beta_test, *args, **kwargs)
+        return res_dict
+
+    def get_trnloss_perex(self) -> dict:
+        res_dict = super().get_trnloss_perex()
         return res_dict
 
     @property
