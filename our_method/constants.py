@@ -60,3 +60,35 @@ TRANSFORM = "transform"
 
 SCHEDULER = "scheduler"
 SCHEDULER_TYPE = "scheduler_type"
+
+Y_DICT = {
+        0:  "02691156",
+        1:  "02828884",
+        2:  "02924116",
+        3:  "02933112",
+        4:  "03001627",
+        5:  "03211117",
+        6:  "03624134",
+        7:  "03636649",
+        8:  "03691459", 
+        9:  "04090263", 
+}
+
+NUM_DICT = {
+        0 : 250,
+        1 : 70,
+        2 : 80  
+}
+
+DIST_DICT = {0 : 0.5,
+            1 : 1.5,
+            2 : 4,
+            }
+    
+SHAPENET_TRAIN_MODEL_PATHS = "/mnt/infonas/data/saikoushik/train_model_path.txt"
+SHAPENET_VAL_MODEL_PATHS = "/mnt/infonas/data/saikoushik/val_model_path.txt"
+SHAPENET_TEST_MODEL_PATHS = "/mnt/infonas/data/saikoushik/test_model_path.txt"
+
+TEMP_IMG_PATH = "/mnt/infonas/data/saikoushik/temp"
+
+    

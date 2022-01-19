@@ -47,14 +47,19 @@ if __name__ == "__main__":
     nnth_args = {
         # constants.SW: sw
     }
-    nnth_mh = main_helper.fit_theta(nn_theta_type=nn_theta_type, models_defname=models_defname,
-                                            dh = dh, nnth_epochs=50,
-                                            fit=False, **nnth_args)
+    import numpy as np
+    #x = dh._test.apply_recourse([0,1],[np.array([3,1,0]),np.array([2,1,0])])
+    x = dh._test.apply_recourse(85,np.array([5,2,3]))
+    
+    print(x)
+    # nnth_mh = main_helper.fit_theta(nn_theta_type=nn_theta_type, models_defname=models_defname,
+    #                                         dh = dh, nnth_epochs=50,
+    #                                         fit=False, **nnth_args)
     
 
-    greedy_r = main_helper.greedy_recourse(dataset_name=dataset_name, nnth_mh=nnth_mh, dh=dh, budget=budget, 
-                                            grad_steps=grad_steps, num_badex=-1, models_defname=models_defname,
-                                            fit = True)
+    #greedy_r = main_helper.greedy_recourse(dataset_name=dataset_name, nnth_mh=nnth_mh, dh=dh, budget=budget, 
+                                            #grad_steps=grad_steps, num_badex=-1, models_defname=models_defname,
+                                            #fit = True)
 
 #     if tune_theta_R == True:
 #         main_helper.fit_R_theta(synR=greedy_r, models_defname=models_defname)
