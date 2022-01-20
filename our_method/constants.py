@@ -10,6 +10,7 @@ SYN_DIR = Path("our_method/data/syn")
 SHAPENET_DIR = Path("our_method/data/shapenet")
 SHAPENET_DIR_SAI = Path("/mnt/infonas/data/saikoushik")
 TB_DIR = Path("tblogs/")
+NUMR_PERITER = "num_r_per_iter"
 
 LOGREG = "LR"
 RESNET = "resnet"

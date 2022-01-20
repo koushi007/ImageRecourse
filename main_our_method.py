@@ -9,27 +9,28 @@ import torch
 import numpy as np
 import sys
 
-cu.set_cuda_device(1)
+cu.set_cuda_device(3)
 cu.set_seed(42)
 
 if __name__ == "__main__":
 
 # %% Hyperparamrs and config section
     nn_theta_type = constants.RESNET
-    nntheta_models_defname = "-resnet"
-    rec_models_defname = "-min"
-    # rec_nntheta_defname = "-debug-rectheta-ft5epochs-adam1e-5"
+    nntheta_suffix = "-base"
+    greedyr_suffix = "-min"
+    rec_nnth_suffix = "-rec-min-scratch-sgd1e-2"
     # nnth_fineR_defname = "-resnet-fineR-scratch-sgd"
-    # nnphi_models_defname = "-resnet-budget=500"
+    nnphi_models_defname = "-resnet-mean"
 
     dataset_name = constants.SHAPENET # shapenet_sample, shapenet
 
     budget = 500
-    num_badex = 1000
+    num_badex = 100
     grad_steps = 50
+    num_r_per_iter = 10
 
-    tune_theta_R = False # For this we will start with the model that is fit on Shapenet and then finetune it further with the weighted loss function that comes out of recourse
-    tune_theta_R_Scratch = False
+    tune_theta_R = True # For this we will start with the model that is fit on Shapenet and then finetune it further with the weighted loss function that comes out of recourse
+    tune_theta_R_Scratch = True
 
     our_method = constants.SEQUENTIAL
     ourm_hlpr_args = {
@@ -40,44 +41,56 @@ if __name__ == "__main__":
         }
     }
     ourm_epochs = 100 # Number of epochs for our method
-    tbdir = constants.TB_DIR / f"our_method/{nntheta_models_defname}"
+    tbdir = constants.TB_DIR / f"our_method/{nntheta_suffix}"
 
 
 # %% Create all the needed objects
 
     dh = main_helper.get_data_helper(dataset_name = dataset_name)
     
-    sw = SummaryWriter(f"tblogs/nn_theta/{nntheta_models_defname}")
+    sw = SummaryWriter(constants.TB_DIR / f"nn_theta/{nntheta_suffix}")
     nnth_args = {
-        # constants.SW: sw
+        constants.SW: sw,
+        constants.BATCH_SIZE: 32
     }
-    nnth_mh = main_helper.fit_theta(nn_theta_type=nn_theta_type, models_defname=nntheta_models_defname,
+    nnth_mh = main_helper.fit_theta(nn_theta_type=nn_theta_type, models_defname=nntheta_suffix,
                                             dh = dh, nnth_epochs=50,
                                             fit=False, **nnth_args)
+
+
+    # sys.exit()
     
-
+    sw = SummaryWriter(constants.TB_DIR / f"greedy_rec/{greedyr_suffix}")
+    greedy_recargs = {
+        constants.SW: sw,
+        constants.BATCH_SIZE: 128,
+        constants.NUMR_PERITER: num_r_per_iter
+    }
     greedy_r = main_helper.greedy_recourse(dataset_name=dataset_name, nnth_mh=nnth_mh, dh=dh, budget=budget, 
-                                            grad_steps=grad_steps, num_badex=1000, models_defname=rec_models_defname,
-                                            fit = True)
+                                            grad_steps=grad_steps, num_badex=500, models_defname=greedyr_suffix,
+                                            fit = False, **greedy_recargs)
 
-    sys.exit()
+    # sys.exit()
 
-    # sw = SummaryWriter(f"tblogs/rec_nn_theta/{rec_nntheta_defname}")
-    # recnnth_args = {
-    #     constants.SW: sw
+    # sw = SummaryWriter(f"tblogs/fineR_theta/{rec_nnth_suffix}")
+    # finetune_nnth_args = {
+    #     constants.SW: sw,
+    #     constants.SCHEDULER: True,
+    #     constants.LRN_RATTE: 1e-2
     # }
     # if tune_theta_R == True:
-    #     main_helper.fit_R_theta(synR=greedy_r, scratch=tune_theta_R_Scratch, models_defname=nnth_fineR_defname, epochs=5)
+    #     main_helper.fit_R_theta(synR=greedy_r, scratch=tune_theta_R_Scratch, models_defname=rec_nnth_suffix, epochs=50, **finetune_nnth_args)
 
 
-    # sw = SummaryWriter(f"tblogs/nnphi/{rec_nntheta_defname}")
-    # nnphi_args = {
-    #     constants.SW: sw
-    # }
-    # nnphi = main_helper.fit_nnphi(dataset_name=dataset_name, dh = dh, greedyR=greedy_r, models_defname=nnphi_models_defname, 
-    #                                 fit = True, **nnphi_args)
-    # tgt_betas = nnphi.collect_tgt_betas()
-    # torch.save(tgt_betas, "our_method/results/models/nnphi/tgtbetas-budget=500.pt")
+    sw = SummaryWriter(f"tblogs/nnphi/{nnphi_models_defname}")
+    nnphi_args = {
+        constants.SW: sw,
+        # constants.SCHEDULER: True
+    }
+    nnphi = main_helper.fit_nnphi(dataset_name=dataset_name, dh = dh, greedyR=greedy_r, models_defname=nnphi_models_defname, 
+                                    fit = True, **nnphi_args)
+    pred_betas = nnphi.collect_rec_betas()
+    torch.save(pred_betas, "our_method/results/models/nnphi/predbetas-mean-budget=500.pt")  
 
 
 

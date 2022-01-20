@@ -30,7 +30,7 @@ class LRModel(nn.Module):
         probs, labels = torch.max(probs, dim=1)
         return labels
 
-class FNN(nn.Module):
+class FNNXBeta(nn.Module):
     """creates a Feed Forward Neural network with the specified Architecture
         nn ([type]): [description]
     """
@@ -75,6 +75,47 @@ class FNN(nn.Module):
         """
         assert self.out_dim == 1, "If u need more than one output, why are u calling this?"
         return torch.sigmoid(self.forward(x, beta)).squeeze()
+
+class FNN(nn.Module):
+    """creates a Feed Forward Neural network with the specified Architecture
+        nn ([type]): [description]
+    """
+    def __init__(self, in_dim, out_dim, nn_arch, prefix, *args, **kwargs):
+        """Creates a basic embedding block
+        Args:
+            in_dim ([type]): [description]
+            embed_arch ([type]): [description]
+        """
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.nn_arch = nn_arch
+        self.prefix = prefix
+
+        assert nn_arch[0] != in_dim and nn_arch[-1] != out_dim, "Assuming that we generally keep only bottleneck or expanding layers, this assert is in place \
+            nn_arch should have only hidden layers -- no input and no output layer"
+
+        need_drp = False
+        if "dropouts" in kwargs:
+            need_drp = True
+            dropout = kwargs["dropouts"]
+
+        self.model = nn.Sequential()
+
+        prev = in_dim
+        for idx, hdim in enumerate(nn_arch):
+            self.model.add_module(f"{self.prefix}-emb_hid_{idx}", nn.Linear(prev, hdim))
+            self.model.add_module(f"{self.prefix}-lReLU_{idx}", nn.LeakyReLU(inplace=True))
+            if need_drp and dropout[idx] != 1:
+                self.model.add_module(f"{self.prefix}-dropout_{idx}", nn.Dropout(p=dropout[idx]))
+            prev = hdim
+        
+        self.model.add_module(f"{self.prefix}-last_layer", nn.Linear(prev, out_dim))
+        
+    def forward(self, input):
+        return self.model(input)
+
+
 
 class ResNET(nn.Module):
     def __init__(self, out_dim, *args, **kwargs):
@@ -133,49 +174,52 @@ class BetaEmbedding(nn.Module):
         self.Emb = nn.Embedding(beta_dim, d_model)
 
     def forward(self, beta):
-        return self.Emb(beta)
+        return torch.squeeze(self.Emb(beta))
 
 
+
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()    
+    def forward(self, x):
+        return x
 
     
 class ResNETRecourse(nn.Module):
     def __init__(self, out_dim, nn_arch, beta_dims, prefix, *args, **kwargs):
         super().__init__()
         self.out_dim = out_dim
+        self.beta_dims = beta_dims
 
         self.resnet_features =  tv_models.resnet18(pretrained=True)
-
         self.emb_dim = self.resnet_features.fc.in_features
-        self.resnet_features.fc = nn.Linear(self.emb_dim, self.out_dim)
-        
-        # self.beta_emb = PositionalEncoding(d_model=self.emb_dim, beta_dims=beta_dims, dropout=0.1)
-        # warnings.warn("Change the max len here if beta were ever to be changed")
+        self.resnet_features.fc = Identity()
 
         self.beta_0_emb = BetaEmbedding(d_model=self.emb_dim, beta_dim=beta_dims[0])
         self.beta_1_emb = BetaEmbedding(d_model=self.emb_dim, beta_dim=beta_dims[1])
         self.beta_2_emb = BetaEmbedding(d_model=self.emb_dim, beta_dim=beta_dims[2])
 
-        self.fnn = FNN(in_dim=self.emb_dim, out_dim=nn_arch[-1], nn_arch=nn_arch[:-1], prefix=prefix, *args, **kwargs)
+        self.beta_classifier = FNN(in_dim=self.emb_dim, out_dim=nn_arch[-1], nn_arch=nn_arch[:-1], prefix=prefix, *args, **kwargs)
 
         self.xbeta_dim = nn_arch[-1]
-        self.beta_0 = nn.Linear(self.xbeta_dim, 1)
-        self.beta_1 = nn.Linear(self.xbeta_dim, 1)
-        self.beta_2 = nn.Linear(self.xbeta_dim, 1)
+        self.beta_0 = nn.Linear(self.xbeta_dim, self.beta_dims[0])
+        self.beta_1 = nn.Linear(self.xbeta_dim, beta_dims[1])
+        self.beta_2 = nn.Linear(self.xbeta_dim, beta_dims[2])
 
         self.sm = nn.Softmax(dim=1)
         self.relu = nn.ReLU()
 
     def forward_proba(self, input, beta):
         beta0, beta1, beta2 = self.forward(input, beta)
-        return [self.sm(beta0), self.sm(beta1), self.sm(beta2)]
+        return torch.stack([self.sm(beta0), self.sm(beta1), self.sm(beta2)], dim=0)
     
     def forward(self, input, beta):
         x_emb = self.resnet_features(input)
-        beta_emb = self.beta_0_emb[beta[0]] + self.beta_1_emb[beta[1]] + self.beta_2_emb[beta[2]]
-        beta_emb /= 3
+        beta_emb = self.beta_0_emb(beta[:,0].view(-1, 1)) + self.beta_1_emb(beta[:,1].view(-1, 1)) + self.beta_2_emb(beta[:,2].view(-1, 1))
+        beta_emb /= 3.
 
         xbeta_emb = x_emb + beta_emb
-        xbeta_emb = self.fnn(xbeta_emb)
+        xbeta_emb = self.beta_classifier(xbeta_emb)
         xbeta_emb = self.relu(xbeta_emb)
 
         beta0 = self.beta_0(xbeta_emb)
@@ -188,7 +232,7 @@ class ResNETRecourse(nn.Module):
     def forward_labels(self, input, beta):
         beta0, beta1, beta2 = self.forward(input, beta)
         label = lambda b : torch.argmax(self.sm(b))
-        return [label(beta0), label(beta1), label(beta2)]
+        return torch.stack([label(beta0), label(beta1), label(beta2)], dim=1)
 
 
         

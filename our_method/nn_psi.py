@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 import our_method.data_helper as ourdh
 from our_method.data_helper import Data
-from our_method.models import FNN, LRModel
+from our_method.models import FNNXBeta, LRModel
 from our_method.nn_theta import NNthHelper
 from our_method.recourse import RecourseHelper
 import our_method.constants as constants
@@ -67,7 +67,7 @@ class NNPsiHelper(ABC):
 
 # %% Properties
     @property
-    def _psimodel(self) -> FNN:
+    def _psimodel(self) -> FNNXBeta:
         return self.psimodel
     @_psimodel.setter
     def _psimodel(self, value):
@@ -245,7 +245,7 @@ class SynNNPsiHelper(NNPsiHelper):
         assert (in_dim, out_dim) == (dh._train._Xdim+dh._train._Betadim, 1), "Why are the input and output dimensions fo NNPhi inconsistent?"
 
         # if u need dropouts, pass it in kwargs
-        psimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch, prefix="psi")
+        psimodel = FNNXBeta(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch, prefix="psi")
         super(SynNNPsiHelper, self).__init__(psimodel, rechlpr, dh, args, kwargs)
 
         tu.init_weights(self._psimodel)

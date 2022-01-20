@@ -10,6 +10,7 @@ import warnings
 from abc import ABC, abstractmethod, abstractproperty
 from copy import deepcopy
 from pathlib import Path
+import time
 
 import numpy as np
 from sympy import C
@@ -25,6 +26,7 @@ from our_method.data_helper import DataHelper
 from our_method.nn_theta import NNthHelper
 import our_method.constants as constants
 from torch.utils.tensorboard.writer import SummaryWriter
+import copy
 
 
 class RecourseHelper(ABC):
@@ -49,15 +51,20 @@ class RecourseHelper(ABC):
         self.Sij = None
         self.trn_wts = np.ones(self.dh._train._num_data)
         self.all_losses_cache = None
+        self.num_r_per_iter = 1
 
         self.__init_kwargs(kwargs)
         self.set_Sij(margin=0)
 
     def __init_kwargs(self, kwargs):
-        if constants.BATCH_SIZE in kwargs:
+        if constants.BATCH_SIZE in kwargs.keys():
             self.batch_size = kwargs[constants.BATCH_SIZE]
-        if constants.LRN_RATTE in kwargs:
+        if constants.LRN_RATTE in kwargs.keys():
             self.lr = kwargs[constants.LRN_RATTE]
+        if constants.SW in kwargs.keys():
+            self.sw = kwargs[constants.SW]
+        if constants.NUMR_PERITER in kwargs.keys():
+            self.num_r_per_iter = kwargs[constants.NUMR_PERITER]
 
     def init_trn_wts(self):
         for rid in self.R:
@@ -114,6 +121,13 @@ class RecourseHelper(ABC):
         self.R = value
 
     @property
+    def _sw(self) -> SummaryWriter:
+        return self.sw
+    @_sw.setter
+    def _sw(self, value):
+        self.sw = value
+
+    @property
     def _trn_wts(self):
         return self.trn_wts
     @_trn_wts.setter
@@ -141,9 +155,8 @@ class RecourseHelper(ABC):
     def get_trnloss_perex(self) -> np.array:
         if self.all_losses_cache is not None:
             return self.all_losses_cache
-        
-        loader = self._dh._train.get_loader(shuffle=False, batch_size=self._batch_size)
-        batch_losses = lambda batchx, batchy: self._nnth.get_loss_perex(batchx, batchy)
+        loader = self._dh._train.get_loader(shuffle=False, batch_size=128) # Have large batch size here for faster parallelism
+        batch_losses = lambda batchx, batchy: self._nnth.get_batchloss_perex(batchx, batchy)
         all_losses = np.hstack([batch_losses(x, y) for dids, zids, x, y, _, _ in loader])
         return all_losses
 
@@ -163,7 +176,7 @@ class RecourseHelper(ABC):
         # We definitely cannot sample elements in R
         num_ex = min(num_ex, self._dh._train._num_data - len(R))
 
-        losses = self.get_trnloss_perex()
+        losses = copy.deepcopy(self.get_trnloss_perex())
         if len(R) > 0:
             losses[np.array(R)] = -np.inf
         return heapq.nlargest(num_ex, range(len(losses)), losses.take)
@@ -264,25 +277,24 @@ class RecourseHelper(ABC):
             # This is for min pooling
             new_wts[sib_ids] += self.Sij[rid]
             new_wts[rid] -= 1 # Note if rid happens to be the least in the group, the net effect is no change so that gain=0
+
         return new_wts
     
     def dump_recourse_state_defname(self, suffix="", model=False):
         dir = self._def_dir
         dir.mkdir(parents=True, exist_ok=True)
         if model:
-            torch.save(self._nnth._model.state_dict(), dir / f"{self._def_name}{suffix}-nnth.pt")
+            self._nnth.save_model_defname(suffix=f"greedy-{suffix}")
         with open(dir/f"{self._def_name}{suffix}-R-Sij.pkl", "wb") as file:
-            pkl.dump({"R": self._R, "Sij": self._Sij}, file)
+            pkl.dump({"R": self._R, "Sij": self._Sij, "trn_wts": self._trn_wts}, file)
 
     def load_recourse_state_defname(self, suffix="", model=False):
         dir = self._def_dir
         if model:
-            self._nnth._model.load_state_dict(
-                torch.load(dir/f"{self._def_name}{suffix}-nnth.pt", map_location=cu.get_device())
-            )
+            self._nnth.load_model_defname(suffix=f"greedy-{suffix}")
         with open(dir/f"{self._def_name}{suffix}-R-Sij.pkl", "rb") as file:
             rsij_dict = pkl.load(file)
-            self._R, self._Sij = rsij_dict["R"], rsij_dict["Sij"]
+            self._R, self._Sij = rsij_dict["R"], rsij_dict["Sij"] # check if we need to load the trn wts also?
         print(f"Loaded Recourse from {dir}/{self._def_name}{suffix}")
 
         # Update the Sij based on the new model
@@ -426,17 +438,8 @@ class ShapenetRecourseHelper(RecourseHelper):
     @property
     def _def_name(self):
         return "shapenet"
-        
 
-    def set_Sij(self, margin):
-        """For real world datasets since we have cuda problems, better to pass a loader.
-        Returns:
-            [type]: [description]
-        """
-        trn_loader_noshuffle = self._dh._train.get_loader(shuffle=False, batch_size=self._batch_size)
-        return super().set_Sij(loader=trn_loader_noshuffle, margin=margin)
-
-    def compute_gain(self, bad_exs, trn_wts):
+    def compute_gain(self, bad_exs, trn_wts) -> np.array:
         """Computes the gain of examples passed in bad_exs
 
         Args:
@@ -463,60 +466,75 @@ class ShapenetRecourseHelper(RecourseHelper):
 
         # Perform one epoch with full min (better to have some tolerance)
 
-        trnd = self._dh._train
-
         self.all_losses_cache = self.get_trnloss_perex()
 
-        for r_iter in range(self._budget):
+        for r_iter in range(int(self._budget/self.num_r_per_iter)):
+
+            start = time.time()
+
+            self.set_Sij(margin=0)
 
             bad_exs = self.sample_bad_ex(self.R)
 
             gain = self.compute_gain(bad_exs=bad_exs, trn_wts=self._trn_wts)
 
-            sel_r = bad_exs[np.argmax(gain)]
+            # sel_r = bad_exs[np.argmax(gain)]
 
-            self.R.append(sel_r)
-            self._trn_wts = self.simulate_addr(self._trn_wts, self.R, sel_r)
+            if self._sw is not None:
+                self._sw.add_scalar("gain", np.max(gain), r_iter)
+
+            sel_r =  heapq.nlargest(self.num_r_per_iter, range(len(gain)), gain.take)
+            print(f"Gain = {np.mean(gain)}")
+
+            for sel_ridx in sel_r:
+                self.R.append(bad_exs[sel_ridx])
+                self._trn_wts = self.simulate_addr(self._trn_wts, self.R, bad_exs[sel_ridx])
             
             self.all_losses_cache = None
 
-            self.minze_theta(self._nnth._trn_loader, torch.Tensor(self.trn_wts).to(cu.get_device()))
+            self.minze_theta(self._nnth._trn_loader, torch.Tensor(self._trn_wts).to(cu.get_device()))
             
             self.all_losses_cache = self.get_trnloss_perex()
 
-            self.set_Sij(margin=0)
-
             rec_loss = np.dot(self.get_trnloss_perex(), self._trn_wts)
 
-            print(f"Inside R iteration {r_iter}; Loss after minimizing on adding {sel_r} is {rec_loss}", flush=True)
+            print(f"Inside R iteration {r_iter}; Loss after minimizing on adding {len(sel_r)} indices is {rec_loss}", flush=True)
 
-            if (r_iter+1) % 50 == 0:
+            if self._sw is not None:
+                self._sw.add_scalar("Recourse Loss", rec_loss, r_iter)
+
+            if (r_iter+1) % 100 == 0:
                 self.dump_recourse_state_defname(suffix=f"riter-{r_iter}", model=False)
+
+            print(f"Time taken = {time.time() - start}")
 
         self.all_losses_cache = None
 
-        return np.array(self.R), self._Sij
+        return np.array(self.R), self._Sij, self._trn_wts
     
     def nnth_rfit(self, scratch, epochs, *args, **kwargs):
         
-        sw = SummaryWriter()
-        rfit_args = {
-            constants.SW: SummaryWriter(f"tblogs/nnth_R/{self._def_name}")
-        }
-
+        rfit_args = {}
+        
         if scratch == True:
             # Initialize the model with pretrained resnet weights
             self._nnth._model = ResNET(out_dim=self._nnth._trn_data._num_classes, **self._nnth.kwargs)
             self._nnth._model = self._nnth._model.to(cu.get_device())
 
+            lr = 1e-3
+            if constants.LRN_RATTE in kwargs.keys():
+                lr = kwargs[constants.LRN_RATTE]
+
             rfit_args[constants.OPTIMIZER] = SGD([
                                                 {'params': self._nnth._model.parameters()},
-                                            ], lr=1e-3)
+                                            ], lr=lr)
         
         else:
             rfit_args[constants.OPTIMIZER] = AdamW([
                                                 {'params': self._nnth._model.parameters()},
                                             ], lr=1e-5)
+
+        rfit_args = cu.insert_kwargs(rfit_args, kwargs)
         
         self._nnth.fit_data(loader = self._nnth._trn_loader, 
                             trn_wts=self.trn_wts,

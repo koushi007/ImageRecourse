@@ -144,20 +144,20 @@ def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epoc
     else:
         nnth_mh.load_model_defname(suffix=models_defname)
 
-    #print(f"Accuracy of {nn_theta_type} trained nn_theta: {nnth_mh.accuracy()}")
-    #print(f"Grp Accuracy of {nn_theta_type} the ERM model is ")
-    #cu.dict_print(nnth_mh.grp_accuracy())
+    # print(f"Accuracy of {nn_theta_type} trained nn_theta: {nnth_mh.accuracy()}")
+    # print(f"Grp Accuracy of {nn_theta_type} the ERM model is ")
+    # cu.dict_print(nnth_mh.grp_accuracy())
     #print(f"Beta Accuracy of {nn_theta_type} the ERM model is ")
     #cu.dict_print(nnth_mh.beta_accuracy())
-    print(f"ideal to non_ideal ratios of {nn_theta_type} the ERM model is ")
-    print(nnth_mh.get_trnloss_perex())
+    # print(f"ideal to non_ideal ratios of {nn_theta_type} the ERM model is ")
+    # print(nnth_mh.get_trnloss_quantiles())
     
     return nnth_mh
 
 
-def fit_R_theta(synR:ourr.RecourseHelper, scratch, models_defname, epochs=1):
+def fit_R_theta(synR:ourr.RecourseHelper, scratch, models_defname, epochs=1, *args, **kwargs):
     # rfit
-    synR.nnth_rfit(epochs=epochs, scratch=scratch)
+    synR.nnth_rfit(epochs=epochs, scratch=scratch, *args, **kwargs)
     print(f"Accuracy after finetuning nntheta on Recourse set with weighted ERM is {synR._nnth.accuracy()}")
     print(f"Grp Accuracy of the rfit finetuned model is ")
     cu.dict_print(synR._nnth.grp_accuracy())
@@ -180,18 +180,20 @@ def greedy_recourse(dataset_name, nnth_mh:ournnth.NNthHelper, dh:ourdh.DataHelpe
         print("Fitting Recourse")
         rechlpr.recourse_theta()
         print(f"Accuracy on last step of Recourse: {rechlpr._nnth.accuracy()}")
-        rechlpr.dump_recourse_state_defname(suffix=models_defname, model=False)
+        rechlpr.dump_recourse_state_defname(suffix=models_defname, model=True)
 
     # load
     else:
-        rechlpr.load_recourse_state_defname(suffix=models_defname, model=False)
+        rechlpr.load_recourse_state_defname(suffix=models_defname, model=True)
         rid_nosij = np.sum(rechlpr.trn_wts[rechlpr._R] != 0)
         warnings.warn(f"There are a total of {rid_nosij} objects without Sij. Removing all such examples")
         rechlpr._trn_wts[rechlpr._R] = 0
         assert  np.sum(rechlpr.trn_wts[rechlpr._R] != 0) == 0, "Now all R should have been removed."
 
-    
-    print(f"Accuracy after loading the recourse model is: {rechlpr._nnth.accuracy()}")
+        # print(f"Accuracy of last step of rec theta trained nn_theta: {rechlpr._nnth.accuracy()}")
+        # print(f"Grp Accuracy of last step of rec theta the ERM model is ")
+        # cu.dict_print(rechlpr._nnth.grp_accuracy())
+        # print(f"Accuracy after loading the recourse model is: {rechlpr._nnth.accuracy()}")
     
     return rechlpr
 
@@ -202,13 +204,16 @@ def fit_nnphi(dataset_name, dh:ourdh.DataHelper, greedyR:ourr.RecourseHelper, mo
         nnpihHelper = SynNNPhiMinHelper(in_dim=dh._train._Xdim+dh._train._Betadim, out_dim=dh._train._Betadim,
                                 nn_arch=[10, 6], rechlpr=greedyR, dh=dh, *args, **kwargs)
     elif dataset_name == constants.SHAPENET or dataset_name == constants.SHAPENET_SAMPLE:
-        nnpihHelper = ShapenetNNPhiMinHelper(in_dim=None, out_dim=1, nn_arch=[128, 64, 16], 
+        nnpihHelper = ShapenetNNPhiMinHelper(in_dim=None, out_dim=None, nn_arch=[128, 64, 16], 
                                             rechlpr=greedyR, dh=dh, *args, **kwargs)
 
     # fit
     if fit == True:
         print("fitting NPhi")
-        nnpihHelper.fit_rec_beta(epochs=30)
+        fit_args = {
+            constants.SCHEDULER: True
+        }
+        nnpihHelper.fit_rec_beta(epochs=30, **fit_args)
         nnpihHelper.save_model_defname(suffix=models_defname)
     # load
     else:

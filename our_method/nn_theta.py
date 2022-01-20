@@ -54,8 +54,8 @@ class NNthHelper(ABC):
 
     def __init_loaders(self):
         self.trn_loader = self._dh._train.get_loader(shuffle=True, batch_size=self._batch_size)
-        self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=self._batch_size)
-        self.val_loader = self._dh._val.get_loader(shuffle=False, batch_size=self._batch_size)
+        self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=128)
+        self.val_loader = self._dh._val.get_loader(shuffle=False, batch_size=128)
 
 # %% properties
     @property
@@ -145,7 +145,7 @@ class NNthHelper(ABC):
         return self.lr_scheduler
     @_lr_scheduler.setter
     def _lr_scheduler(self, value):
-        self._lr_scheduler = value
+        self.lr_scheduler = value
 
     @property
     def _xecri(self):
@@ -300,9 +300,9 @@ class NNthHelper(ABC):
                 res_dict[f"id-{id} beta-{beta}"] = self.accuracy(loader=beta_value_loader)
         return res_dict
 
-    def get_trnloss_perex(self) -> dict:
+    def get_trnloss_quantiles(self) -> dict:
         loader = self._dh._test.get_loader_with_ideal(False,1)
-        batch_losses = lambda batchx, batchy: self.get_loss_perex(batchx, batchy)
+        batch_losses = lambda batchx, batchy: self.get_batchloss_perex(batchx, batchy)
         all_losses = [(float(batch_losses(x, y)),ideal_beta) for dids, ideal_beta, x, y, _, _ in loader]
         betas_sorted = [i[1] for i in sorted(all_losses,reverse=True)]
         qu = [1, 2, 3, 5, 7, 10, 20, 30, 40, 50,100]
@@ -317,7 +317,7 @@ class NNthHelper(ABC):
 
         return res_dict
 
-    def get_loss_perex(self, X_test, y_test):
+    def get_batchloss_perex(self, X_test, y_test):
         """Gets the cross entropy loss per example
 
         Args:
@@ -336,6 +336,13 @@ class NNthHelper(ABC):
         return self._xecri_perex(
             T(probs).to(cu.get_device()), T(y_test).to(cu.get_device(), dtype=torch.int64)
         ).cpu().numpy()
+
+    def get_loaderlosses_perex(self, loader=None) -> np.array:
+        if loader is None:
+            loader = self._dh._train.get_loader(shuffle=False, batch_size=self._batch_size)
+        batch_losses = lambda batchx, batchy: self.get_batchloss_perex(batchx, batchy)
+        all_losses = np.hstack([batch_losses(x, y) for dids, zids, x, y, _, _ in loader])
+        return all_losses
 
     def get_loss(self, X_test, y_test):
         """Returns the Loss of the batch
@@ -510,16 +517,11 @@ class ResNETNNthHepler(NNthHelper):
         if constants.SW in kwargs.keys():
             self._sw = kwargs[constants.SW]
 
-        def do_post_fit():
-            # print(f"Accuracy: {self.accuracy()}")
-            return
-
         for epoch in range(total_epochs):
             tq = tqdm(total=len(loader))
             for epoch_step, (batch_ids, batch_zids, x, y, z, beta) in enumerate(loader):
                 global_step += 1
                 if global_step == total_sgd_steps:
-                    do_post_fit()
                     return
 
                 x, y, batch_ids = x.to(cu.get_device()), y.to(cu.get_device(), dtype=torch.int64), batch_ids.to(cu.get_device(), dtype=torch.int64)
@@ -564,7 +566,7 @@ class ResNETNNthHepler(NNthHelper):
         res_dict["ideal_accuracy"] = self.accuracy(loader=tu.get_loader_subset(loader, ideal_idxs))
         res_dict["non-ideal_accuracy"] = self.accuracy(loader=tu.get_loader_subset(loader, non_ideal_idxs))
 
-        return 
+        return res_dict
         
     def beta_accuracy(self, X_test=None, y_test=None, Beta_test=None, *args, **kwargs) -> dict:
 
@@ -581,10 +583,7 @@ class ResNETNNthHepler(NNthHelper):
         res_dict = super().beta_accuracy(X_test, y_test, Beta_test, *args, **kwargs)
         return res_dict
 
-    def get_trnloss_perex(self) -> dict:
-        res_dict = super().get_trnloss_perex()
-        return res_dict
 
     @property
     def _def_name(self):
-        return "nntheta_resnet"
+        return "resnet"

@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 import our_method.data_helper as ourdh
 from our_method.data_helper import Data
-from our_method.models import FNN, LRModel, ResNETRecourse
+from our_method.models import FNNXBeta, LRModel, ResNETRecourse
 from our_method.nn_theta import NNthHelper
 from our_method.recourse import RecourseHelper
 import our_method.constants as constants
@@ -34,15 +34,17 @@ class NNPhiHelper(ABC):
         self.sw = None
         self.batch_size = 16
 
+        self.lr_scheduler = None
+
         self.__init_kwargs(kwargs)
         self.__init_loaders()
     
     def __init_kwargs(self, kwargs:dict):
         if constants.LRN_RATTE in kwargs.keys():
             self.lr = kwargs[constants.LRN_RATTE]
-        if constants.SW in kwargs:
+        if constants.SW in kwargs.keys():
             self.sw = kwargs[constants.SW]
-        if constants.BATCH_SIZE in kwargs:
+        if constants.BATCH_SIZE in kwargs.keys():
             self.batch_size = kwargs[constants.BATCH_SIZE]
 
     def __init_loaders(self):
@@ -56,7 +58,7 @@ class NNPhiHelper(ABC):
         trn_Beta = self._trn_data._Beta
         trn_Sij = np.array(self._rechlpr._Sij)
         trn_sibs = self._trn_data._Siblings
-        trn_losses = self._rechlpr._nnth.get_loaderloss_perex()
+        trn_losses = self._rechlpr._nnth.get_loaderlosses_perex()
         sib_losses = np.array([trn_losses[sib_ids] for sib_ids in trn_sibs])
         # now get the target beta. We only compute the sibnling betas here. Create the target as please later
         trn_sib_beta = np.array([
@@ -76,8 +78,8 @@ class NNPhiHelper(ABC):
                     **phids_args)
         self.trn_loader = data_utils.DataLoader(phi_ds, batch_size=self._batch_size, shuffle=True)
 
-        self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=self._batch_size)
-        self.val_loader = self._dh._val.get_loader(shuffle=False, batch_size=self._batch_size)
+        self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=128)
+        self.val_loader = self._dh._val.get_loader(shuffle=False, batch_size=128)
 
 # %% Properties
     @property
@@ -153,6 +155,13 @@ class NNPhiHelper(ABC):
     @_lr.setter
     def _lr(self, value):
         self.lr = value
+
+    @property
+    def _lr_scheduler(self):
+        return self.lr_scheduler
+    @_lr_scheduler.setter
+    def _lr_scheduler(self, value):
+        self.lr_scheduler = value
 
     @property
     def _sw(self) -> SummaryWriter:
@@ -272,12 +281,21 @@ class NNPhiHelper(ABC):
         self._phimodel.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
     def collect_tgt_betas(self):
-        global_step = 0
         loader = self._trn_loader
-        tq = tqdm(total=len(loader))
+        beta_preds = []
 
+        for epoch_step, (rids, X, Beta, SibBeta, Sij, Siblosses) in enumerate(loader):
+            X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device()),\
+                    SibBeta.to(cu.get_device()), Siblosses.to(cu.get_device())
+            
+            beta_pred = self._phimodel.forward(X, Beta)
+            beta_preds.append(beta_pred)
+
+        return torch.vstack(beta_preds)
+
+    def collect_rec_betas(self):
+        loader = self._trn_loader
         tgt_betas = []
-
         for epoch_step, (rids, X, Beta, SibBeta, Sij, Siblosses) in enumerate(loader):
 
             X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device()),\
@@ -294,6 +312,7 @@ class NNPhiHelper(ABC):
 
 
 
+
 class SynNNPhiMeanHelper(NNPhiHelper):  
     """This is the default class for BBPhi.
     This des mean Recourse of Betas
@@ -305,6 +324,8 @@ class SynNNPhiMeanHelper(NNPhiHelper):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.nn_arch = nn_arch
+
+        raise ValueError("Is this not deprecated?")
 
         assert (in_dim, out_dim) == (dh._train._Xdim+dh._train._Betadim, dh._train._Betadim), "Why are the input and output dimensions fo NNPhi inconsistent?"
 
@@ -377,7 +398,7 @@ class SynNNPhiMinHelper(NNPhiHelper):
         assert (in_dim, out_dim) == (dh._train._Xdim+dh._train._Betadim, dh._train._Betadim), "Why are the input and output dimensions fo NNPhi inconsistent?"
 
         # if u need dropouts, pass it in kwargs
-        phimodel = FNN(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch, prefix="phi")
+        phimodel = FNNXBeta(in_dim=in_dim, out_dim=out_dim, nn_arch=nn_arch, prefix="phi")
         super(SynNNPhiMinHelper, self).__init__(phimodel, rechlpr, dh, args, kwargs)
 
         tu.init_weights(self._phimodel)
@@ -443,8 +464,8 @@ class ShapenetNNPhiMinHelper(NNPhiHelper):
         self.nn_arch = nn_arch
 
         # if u need dropouts, pass it in kwargs
-        phimodel = ResNETRecourse(out_dim=1, nn_arch=nn_arch, beta_dims=dh._train._BetaShape, prefix="shapenetnnphi", *args, **kwargs)
-        super(ShapenetNNPhiMinHelper, self).__init__(phimodel, rechlpr, dh, args, kwargs)
+        phimodel = ResNETRecourse(out_dim=sum(dh._train._BetaShape), nn_arch=nn_arch, beta_dims=dh._train._BetaShape, prefix="shapenetnnphi", *args, **kwargs)
+        super(ShapenetNNPhiMinHelper, self).__init__(phimodel, rechlpr, dh, args, **kwargs)
 
         self._phimodel.to(cu.get_device())
         
@@ -452,6 +473,8 @@ class ShapenetNNPhiMinHelper(NNPhiHelper):
         self._optimizer = AdamW([
             {'params': self._phimodel.parameters()},
         ], lr=self._lr)
+
+       
         
     def fit_rec_beta(self, epochs, loader:data_utils.DataLoader=None, *args, **kwargs):
         """fits the data on the Dataloader that is passed
@@ -467,13 +490,20 @@ class ShapenetNNPhiMinHelper(NNPhiHelper):
         else:
             warnings.warn("Are u sure u want to pass a custom loader?")
 
+        if constants.SW in kwargs.keys():
+            self._sw = kwargs[constants.SW]
+        if constants.SCHEDULER in kwargs.keys():
+            if constants.SCHEDULER_TYPE in kwargs.keys():
+                raise NotImplementedError()
+            self._lr_scheduler = tu.get_lr_scheduler(self._optimizer, scheduler_name="cosine_annealing", n_rounds=epochs)
+
         for epoch in range(epochs):
             tq = tqdm(total=len(loader))
             for epoch_step, (rids, X, Beta, SibBeta, Sij, Siblosses) in enumerate(loader):
                 global_step += 1
 
-                X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device()),\
-                     SibBeta.to(cu.get_device()), Siblosses.to(cu.get_device())
+                X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device(), dtype=torch.int64),\
+                     SibBeta.to(cu.get_device(), dtype=torch.int64), Siblosses.to(cu.get_device())
 
                 sel_min = lambda t, losses_i : torch.squeeze(t[torch.argmin(losses_i)])
 
@@ -484,20 +514,25 @@ class ShapenetNNPhiMinHelper(NNPhiHelper):
                 self._optimizer.zero_grad()
                 beta_preds = self._phimodel.forward(X, Beta)
 
-                loss = torch.sum([self._xecri(beta_preds[entry], tgt_beta[entry]) for entry in beta_preds])
-
-                loss = self._msecri(beta_preds, tgt_beta)
-
+                loss = self._xecri(beta_preds[0], tgt_beta[:, 0]) + self._xecri(beta_preds[1], tgt_beta[:, 1]) +  \
+                        self._xecri(beta_preds[2], tgt_beta[:, 2])
+                loss /= 3
                 loss.backward()
+
                 self._optimizer.step()
-                self._sw.add_scalar("beta_loss", loss.item())
+                if self._sw is not None:
+                    self._sw.add_scalar("beta_loss", loss.item())
+
                 tq.set_postfix({"Loss": loss.item()})
-                tq.update(1)                
+                tq.update(1)       
+
+            if self._lr_scheduler is not None:
+                self._lr_scheduler.step()         
         
 
     @property
     def _def_name(self):
-        return f"nnphimin_{self.nn_arch}"
+        return f"phi_min"
 
 
    
