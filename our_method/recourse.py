@@ -289,6 +289,9 @@ class RecourseHelper(ABC):
             pkl.dump({"R": self._R, "Sij": self._Sij, "trn_wts": self._trn_wts}, file)
 
     def load_recourse_state_defname(self, suffix="", model=False):
+
+        assert model == False, "When u send True here check is nnth in nnthhelper and rechlpr is in sync?"
+
         dir = self._def_dir
         if model:
             self._nnth.load_model_defname(suffix=f"greedy-{suffix}")

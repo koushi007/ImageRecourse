@@ -34,7 +34,7 @@ def generic_init_loader(*args, **kwargs):
     """
     T = torch.Tensor
     dataset = data_utils.TensorDataset(*[T(entry) for entry in args])
-    if "sampler" in kwargs:
+    if "sampler" in kwargs.keys():
         return data_utils.DataLoader(dataset, batch_size=kwargs["batch_size"], sampler=kwargs["sampler"])
     else:
         shuffle = kwargs["shuffle"]
@@ -140,7 +140,7 @@ class CustomTensorDataset(data_utils.Dataset):
         self.Beta = Beta
 
         self.transform = None
-        if constants.TRANSFORM in kwargs:
+        if constants.TRANSFORM in kwargs.keys():
             self.transform = kwargs[constants.TRANSFORM]
 
     def __getitem__(self, index):
@@ -164,7 +164,7 @@ class CustomPhiDataset(data_utils.Dataset):
         self.Sib_losses = Sib_losses
 
         self.transform = None
-        if constants.TRANSFORM in kwargs:
+        if constants.TRANSFORM in kwargs.keys():
             self.transform = kwargs[constants.TRANSFORM]
 
     def __getitem__(self, index):
@@ -177,6 +177,29 @@ class CustomPhiDataset(data_utils.Dataset):
 
     def __len__(self):
         return len(self.R_ids)
+
+
+class CustomPsiDataset(data_utils.Dataset):
+    """TensorDataset with support of transforms.
+    """
+    def __init__(self, X, Beta, R_tgts, *args,  **kwargs):
+        self.X = X
+        self.Beta = Beta
+        self.R_tgts = R_tgts
+
+        self.transform = None
+        if constants.TRANSFORM in kwargs.keys():
+            self.transform = kwargs[constants.TRANSFORM]
+
+    def __getitem__(self, index):
+        r_id, x, beta = self.R_tgts[index], self.X[index], self.Beta[index]
+
+        if self.transform is not None:
+            x = self.transform(x)
+        return x, beta, r_id
+
+    def __len__(self):
+        return len(self.R_tgts)
 
 
 

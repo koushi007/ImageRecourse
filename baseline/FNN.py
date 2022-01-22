@@ -13,7 +13,7 @@ class FNN(nn.Module):
         """
         super().__init__()
 
-        if "prefix" in kwargs:
+        if "prefix" in kwargs.keys():
             self.prefix = f"{kwargs['prefix']}_" 
         else:
             self.prefix = ""

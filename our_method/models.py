@@ -7,6 +7,8 @@ from torchvision import models as tv_models
 import math
 import numpy as np
 import warnings
+import utils.common_utils as cu
+import our_method.constants as constants
 
 class LRModel(nn.Module):
     def __init__(self, in_dim, n_classes, *args, **kwargs):
@@ -50,9 +52,13 @@ class FNNXBeta(nn.Module):
             nn_arch should have only hidden layers -- no input and no output layer"
 
         need_drp = False
-        if "dropouts" in kwargs:
+        if "dropouts" in kwargs.keys():
             need_drp = True
             dropout = kwargs["dropouts"]
+        self.batch_norm = False
+        if constants.BATCH_NORM in kwargs.keys():
+            self.batch_norm = kwargs[constants.BATCH_NORM]
+
 
         self.model = nn.Sequential()
 
@@ -62,6 +68,8 @@ class FNNXBeta(nn.Module):
             self.model.add_module(f"{self.prefix}-lReLU_{idx}", nn.LeakyReLU(inplace=True))
             if need_drp and dropout[idx] != 1:
                 self.model.add_module(f"{self.prefix}-dropout_{idx}", nn.Dropout(p=dropout[idx]))
+            if self.batch_norm:
+                self.model.add_module(f"{self.prefix}-bn_{idx}", nn.BatchNorm1d(hdim))
             prev = hdim
         
         self.model.add_module(f"{self.prefix}-last_layer", nn.Linear(prev, out_dim))
@@ -96,9 +104,12 @@ class FNN(nn.Module):
             nn_arch should have only hidden layers -- no input and no output layer"
 
         need_drp = False
-        if "dropouts" in kwargs:
+        if "dropouts" in kwargs.keys():
             need_drp = True
             dropout = kwargs["dropouts"]
+        self.batch_norm = False
+        if constants.BATCH_NORM in kwargs.keys():
+            self.batch_norm = kwargs[constants.BATCH_NORM]
 
         self.model = nn.Sequential()
 
@@ -108,6 +119,8 @@ class FNN(nn.Module):
             self.model.add_module(f"{self.prefix}-lReLU_{idx}", nn.LeakyReLU(inplace=True))
             if need_drp and dropout[idx] != 1:
                 self.model.add_module(f"{self.prefix}-dropout_{idx}", nn.Dropout(p=dropout[idx]))
+            if self.batch_norm:
+                self.model.add_module(f"{self.prefix}-bn_{idx}", nn.BatchNorm1d(hdim))
             prev = hdim
         
         self.model.add_module(f"{self.prefix}-last_layer", nn.Linear(prev, out_dim))
@@ -211,7 +224,7 @@ class ResNETRecourse(nn.Module):
 
     def forward_proba(self, input, beta):
         beta0, beta1, beta2 = self.forward(input, beta)
-        return torch.stack([self.sm(beta0), self.sm(beta1), self.sm(beta2)], dim=0)
+        return torch.hstack([self.sm(beta0), self.sm(beta1), self.sm(beta2)])
     
     def forward(self, input, beta):
         x_emb = self.resnet_features(input)
@@ -231,8 +244,43 @@ class ResNETRecourse(nn.Module):
         
     def forward_labels(self, input, beta):
         beta0, beta1, beta2 = self.forward(input, beta)
-        label = lambda b : torch.argmax(self.sm(b))
-        return torch.stack([label(beta0), label(beta1), label(beta2)], dim=1)
+        label = lambda b : torch.argmax(self.sm(b), dim=1).view(-1, 1)
+        return torch.hstack([label(beta0), label(beta1), label(beta2)])
 
 
+class ResNETPsi(nn.Module):
+    def __init__(self, out_dim, nn_arch, beta_dims, prefix, *args, **kwargs):
+        super().__init__()
+        self.out_dim = out_dim
+        self.beta_dims = beta_dims
+
+        self.resnet_features =  tv_models.resnet18(pretrained=True)
+        self.emb_dim = self.resnet_features.fc.in_features
+        self.resnet_features.fc = Identity()
+
+        self.beta_0_emb = BetaEmbedding(d_model=self.emb_dim, beta_dim=beta_dims[0])
+        self.beta_1_emb = BetaEmbedding(d_model=self.emb_dim, beta_dim=beta_dims[1])
+        self.beta_2_emb = BetaEmbedding(d_model=self.emb_dim, beta_dim=beta_dims[2])
+
+        self.r_classifier = FNN(in_dim=self.emb_dim, out_dim=nn_arch[-1], nn_arch=nn_arch[:-1], prefix=prefix, *args, **kwargs)
+
+        # self.xbeta_dim = nn_arch[-1]
+        # self.beta_0 = nn.Linear(self.xbeta_dim, self.beta_dims[0])
+        # self.beta_1 = nn.Linear(self.xbeta_dim, beta_dims[1])
+        # self.beta_2 = nn.Linear(self.xbeta_dim, beta_dims[2])
+
+        self.sigmoid = nn.Sigmoid()
+        self.relu = nn.ReLU()
+
+    def forward(self, input, beta):
+        x_emb = self.resnet_features(input)
+        beta_emb = self.beta_0_emb(beta[:,0].view(-1, 1)) + self.beta_1_emb(beta[:,1].view(-1, 1)) + self.beta_2_emb(beta[:,2].view(-1, 1))
+        beta_emb /= 3.
+
+        xbeta_emb = x_emb + beta_emb
+        r = self.r_classifier(xbeta_emb)
         
+        return r
+        
+    def forward_r(self, input, beta):
+        return self.sigmoid(self.forward(input, beta))

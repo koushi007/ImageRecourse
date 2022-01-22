@@ -45,11 +45,11 @@ class NNthHelper(ABC):
 
         if constants.LRN_RATTE in kwargs.keys():
             self.lr = kwargs[constants.LRN_RATTE]
-        if constants.SW in kwargs:
+        if constants.SW in kwargs.keys():
             self.sw = kwargs[constants.SW]
-        if constants.BATCH_SIZE in kwargs:
+        if constants.BATCH_SIZE in kwargs.keys():
             self.batch_size = kwargs[constants.BATCH_SIZE]
-        if constants.MOMENTUM in kwargs:
+        if constants.MOMENTUM in kwargs.keys():
             self.momentum = kwargs[constants.MOMENTUM]
 
     def __init_loaders(self):

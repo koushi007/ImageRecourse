@@ -400,7 +400,7 @@ class BaselineHelper(MethodsHelper):
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         
         inter_iters = -1
-        if "interleave_iters" in kwargs:
+        if "interleave_iters" in kwargs.keys():
             inter_iters = kwargs["interleave_iters"]
 
         self._thmodel.train()
@@ -498,7 +498,7 @@ class BaselineKLHelper(MethodsHelper):
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         
         inter_iters = -1
-        if "interleave_iters" in kwargs:
+        if "interleave_iters" in kwargs.keys():
             inter_iters = kwargs["interleave_iters"]
 
         self._thmodel.train()

@@ -69,13 +69,13 @@ class NNPhiHelper(ABC):
         # self.trn_loader = tu.generic_init_loader(R_ids, trn_X[R_ids], trn_Beta[R_ids], trn_sib_beta[R_ids], trn_Sij[R_ids], sib_losses[R_ids], 
         #         shuffle=True, batch_size=self._batch_size)
 
-        phids_args = {
+        phi_dsargs = {
             constants.TRANSFORM: self._dh._train.transform
         }
         T = torch.Tensor
         phi_ds = tu.CustomPhiDataset(R_ids=T(R_ids).to(dtype=torch.int64), X=T(trn_X[R_ids]), Beta=T(trn_Beta[R_ids]),
                     Sib_beta=T(trn_sib_beta[R_ids]), Sij=T(trn_Sij[R_ids]), Sib_losses=T(sib_losses[R_ids]), 
-                    **phids_args)
+                    **phi_dsargs)
         self.trn_loader = data_utils.DataLoader(phi_ds, batch_size=self._batch_size, shuffle=True)
 
         self.tst_loader = self._dh._test.get_loader(shuffle=False, batch_size=128)
@@ -172,7 +172,7 @@ class NNPhiHelper(ABC):
 
     @property
     def _def_dir(self):
-        return Path("our_method/results/syn/models")
+        return Path("our_method/results/models/nnphi")
 
     @abstractproperty
     def _def_name(self):
@@ -280,26 +280,26 @@ class NNPhiHelper(ABC):
         print(f"Loaded model from {str(fname)}")
         self._phimodel.load_state_dict(torch.load(fname, map_location=cu.get_device()))
 
-    def collect_tgt_betas(self):
+    def collect_rec_betas(self):
         loader = self._trn_loader
         beta_preds = []
 
         for epoch_step, (rids, X, Beta, SibBeta, Sij, Siblosses) in enumerate(loader):
-            X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device()),\
-                    SibBeta.to(cu.get_device()), Siblosses.to(cu.get_device())
+            X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device(), dtype=torch.int64),\
+                    SibBeta.to(cu.get_device(), dtype=torch.int64), Siblosses.to(cu.get_device())
             
-            beta_pred = self._phimodel.forward(X, Beta)
+            beta_pred = self._phimodel.forward_labels(X, Beta).detach()
             beta_preds.append(beta_pred)
 
-        return torch.vstack(beta_preds)
+        return torch.cat(beta_preds, dim=0)
 
-    def collect_rec_betas(self):
+    def collect_tgt_betas(self):
         loader = self._trn_loader
         tgt_betas = []
         for epoch_step, (rids, X, Beta, SibBeta, Sij, Siblosses) in enumerate(loader):
 
-            X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device()),\
-                    SibBeta.to(cu.get_device()), Siblosses.to(cu.get_device())
+            X, Beta, SibBeta, Siblosses = X.to(cu.get_device()), Beta.to(cu.get_device(), dtype=torch.int64),\
+                    SibBeta.to(cu.get_device(), dtype=torch.int64), Siblosses.to(cu.get_device())
 
             sel_min = lambda t, losses_i : torch.squeeze(t[torch.argmin(losses_i)])
 
@@ -308,7 +308,7 @@ class NNPhiHelper(ABC):
             ])
             tgt_betas.append(tgt_beta)
 
-        return torch.vstack(tgt_betas)
+        return torch.cat(tgt_betas, dim=0)
 
 
 
@@ -450,6 +450,10 @@ class SynNNPhiMinHelper(NNPhiHelper):
     @property
     def _def_name(self):
         return f"nnphimin_{self.nn_arch}"
+    
+    @property
+    def _def_dir(self):
+        return Path("our_method/results/syn/models")
 
 class ShapenetNNPhiMinHelper(NNPhiHelper):  
     """This is the default class for BBPhi.
@@ -464,7 +468,7 @@ class ShapenetNNPhiMinHelper(NNPhiHelper):
         self.nn_arch = nn_arch
 
         # if u need dropouts, pass it in kwargs
-        phimodel = ResNETRecourse(out_dim=sum(dh._train._BetaShape), nn_arch=nn_arch, beta_dims=dh._train._BetaShape, prefix="shapenetnnphi", *args, **kwargs)
+        phimodel = ResNETRecourse(out_dim=sum(dh._train._BetaShape), nn_arch=nn_arch, beta_dims=dh._train._BetaShape, prefix="resnetnnphi", *args, **kwargs)
         super(ShapenetNNPhiMinHelper, self).__init__(phimodel, rechlpr, dh, args, **kwargs)
 
         self._phimodel.to(cu.get_device())
@@ -521,7 +525,7 @@ class ShapenetNNPhiMinHelper(NNPhiHelper):
 
                 self._optimizer.step()
                 if self._sw is not None:
-                    self._sw.add_scalar("beta_loss", loss.item())
+                    self._sw.add_scalar("beta_loss", loss.item(), global_step)
 
                 tq.set_postfix({"Loss": loss.item()})
                 tq.update(1)       
@@ -532,7 +536,4 @@ class ShapenetNNPhiMinHelper(NNPhiHelper):
 
     @property
     def _def_name(self):
-        return f"phi_min"
-
-
-   
+        return f"resnet_phi"

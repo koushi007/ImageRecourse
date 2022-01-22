@@ -7,7 +7,7 @@ import our_method.data_helper as ourdh
 import numpy as np
 from our_method.methods import MethodsHelper
 from our_method.nn_phi import ShapenetNNPhiMinHelper, SynNNPhiMinHelper
-from our_method.nn_psi import SynNNPsiHelper
+from our_method.nn_psi import ShapenetNNPsiHelper, SynNNPsiHelper
 import our_method.nn_theta as ournnth
 import utils.common_utils as cu
 import our_method.recourse as ourr
@@ -106,6 +106,8 @@ def get_data_helper(dataset_name):
         dh = ourdh.ShapenetDataHelper(train_data, test_data, val_data)
     else:
         raise ValueError("Pass supported datasets only")
+    
+    print("Dataset loaded.")
     return dh
 
     
@@ -152,6 +154,8 @@ def fit_theta(nn_theta_type, models_defname, dh:ourdh.DataHelper, fit, nnth_epoc
     # print(f"ideal to non_ideal ratios of {nn_theta_type} the ERM model is ")
     # print(nnth_mh.get_trnloss_quantiles())
     
+
+    print("nnth helper Ready!")
     return nnth_mh
 
 
@@ -184,7 +188,7 @@ def greedy_recourse(dataset_name, nnth_mh:ournnth.NNthHelper, dh:ourdh.DataHelpe
 
     # load
     else:
-        rechlpr.load_recourse_state_defname(suffix=models_defname, model=True)
+        rechlpr.load_recourse_state_defname(suffix=models_defname, model=False) 
         rid_nosij = np.sum(rechlpr.trn_wts[rechlpr._R] != 0)
         warnings.warn(f"There are a total of {rid_nosij} objects without Sij. Removing all such examples")
         rechlpr._trn_wts[rechlpr._R] = 0
@@ -195,6 +199,8 @@ def greedy_recourse(dataset_name, nnth_mh:ournnth.NNthHelper, dh:ourdh.DataHelpe
         # cu.dict_print(rechlpr._nnth.grp_accuracy())
         # print(f"Accuracy after loading the recourse model is: {rechlpr._nnth.accuracy()}")
     
+
+    print("Greedy Recourse Ready!")
     return rechlpr
 
 
@@ -213,35 +219,40 @@ def fit_nnphi(dataset_name, dh:ourdh.DataHelper, greedyR:ourr.RecourseHelper, mo
         fit_args = {
             constants.SCHEDULER: True
         }
-        nnpihHelper.fit_rec_beta(epochs=30, **fit_args)
+        nnpihHelper.fit_rec_beta(epochs=50, **fit_args)
         nnpihHelper.save_model_defname(suffix=models_defname)
     # load
     else:
         nnpihHelper.load_model_defname(suffix=models_defname)
-    
-    # pred_betas, aft_acc, bef_acc = nnpihHelper.recourse_accuracy(dh._test._X, dh._test._y, dh._test._Z, dh._test._Beta)
-    # print(f"Accuracy Before = {bef_acc}; After = {aft_acc}; pred_betas from phi: {np.sum(pred_betas, axis=0)}")
+
+    print("nnpi Ready!")
     return nnpihHelper
 
 
-def fit_nnpsi(dh:ourdh.DataHelper, nnarch_args, synR:ourr.RecourseHelper, epochs, models_defname, fit):
+def fit_nnpsi(dataset_name,  dh:ourdh.DataHelper, nn_arch, synR:ourr.RecourseHelper, epochs, models_defname, fit, *args, **kwargs):
 
-
-    nn_arch = nnarch_args["nn_arch"]
-    nnpsiHelper = SynNNPsiHelper(in_dim=dh._train._Xdim+dh._train._Betadim, out_dim=1, nn_arch=nn_arch, 
+    if dataset_name == constants.SYNTHETIC:
+         nnpsiHelper = SynNNPsiHelper(in_dim=dh._train._Xdim+dh._train._Betadim, out_dim=1, nn_arch=nn_arch, 
                                 rechlpr=synR, dh=dh)
+    elif dataset_name == constants.SHAPENET or dataset_name == constants.SHAPENET_SAMPLE:
+        nnpsiHelper = ShapenetNNPsiHelper(out_dim=1, nn_arch=nn_arch, 
+                                rechlpr=synR, dh=dh, **kwargs)
 
     # fit
     if fit == True:
         print("Fitting NNPsi")
-        nnpsiHelper.fit_rec_r(epochs=epochs)
+        fit_args = {
+            constants.SCHEDULER: True
+        }
+        fit_args = cu.insert_kwargs(kwargs, fit_args)
+        nnpsiHelper.fit_rec_r(epochs=epochs, **fit_args)
         nnpsiHelper.save_model_defname(suffix=models_defname)
 
     # load
     else:
         nnpsiHelper.load_model_defname(suffix=models_defname)
 
-    rid, rec_beta = nnpsiHelper.r_acc(dh._test._X, dh._test._y, dh._test._Beta)
+    rid, rec_beta = nnpsiHelper.r_acc(data="train")
     print(f"Num recourse = {len(rid)}; pred_beta from psi: {np.sum(rec_beta, axis=0)}")
     return nnpsiHelper
 

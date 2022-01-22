@@ -48,9 +48,9 @@ class ModelHelper(ABC):
 # %% inits
     
     def __init_kwargs(self, kwargs):
-        if constants.BATCH_SIZE in kwargs:
+        if constants.BATCH_SIZE in kwargs.keys():
             self.batch_size = kwargs[constants.BATCH_SIZE]   
-        if constants.SW in kwargs:
+        if constants.SW in kwargs.keys():
             self.sw = kwargs[constants.SW]
 
     def __init_loaders(self):
@@ -422,7 +422,7 @@ class BaselineHelper(SynRecourse):
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         
         inter_iters = -1
-        if "interleave_iters" in kwargs:
+        if "interleave_iters" in kwargs.keys():
             inter_iters = kwargs["interleave_iters"]
 
         self._model.train()
@@ -495,7 +495,7 @@ class BaselineKLHelper(SynRecourse):
     def fit_epoch(self, epoch, loader=None, *args, **kwargs):
         
         inter_iters = -1
-        if "interleave_iters" in kwargs:
+        if "interleave_iters" in kwargs.keys():
             inter_iters = kwargs["interleave_iters"]
 
         self._model.train()

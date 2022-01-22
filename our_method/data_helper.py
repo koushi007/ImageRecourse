@@ -40,7 +40,7 @@ class Data(ABC):
         self.__init_kwargs(kwargs)
 
     def __init_kwargs(self, kwargs):
-         if constants.TRANSFORM in kwargs:
+         if constants.TRANSFORM in kwargs.keys():
             self.transform = kwargs[constants.TRANSFORM]
 
     @property
